@@ -1,4 +1,5 @@
 export type PagePreset = 'A4' | 'A3' | 'custom';
+export type TargetColorMode = 'bw' | 'color';
 
 export interface LayoutInput {
   pageWidthMm: number;
@@ -262,4 +263,44 @@ export function getTargetCenterMm(
 export function ringColorByIndex(ringIndexFromOuter: number, startWithBlack: boolean): '#000000' | '#FFFFFF' {
   const isBlack = startWithBlack ? ringIndexFromOuter % 2 === 0 : ringIndexFromOuter % 2 !== 0;
   return isBlack ? '#000000' : '#FFFFFF';
+}
+
+export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number): number {
+  const safeRingCount = Math.max(1, Math.round(ringCount));
+  return safeRingCount - ringIndexFromOuter;
+}
+
+export function ringFillColor(
+  ringIndexFromOuter: number,
+  ringCount: number,
+  colorMode: TargetColorMode,
+  startWithBlack: boolean,
+): string {
+  if (colorMode === 'bw') {
+    return ringColorByIndex(ringIndexFromOuter, startWithBlack);
+  }
+
+  // 经典环靶配色（按分值分段）：1-2 白，3-4 黑，5-6 蓝，7-8 红，9+ 黄
+  const score = ringScoreByIndex(ringIndexFromOuter, ringCount);
+  if (score >= 9) {
+    return '#facc15';
+  }
+  if (score >= 7) {
+    return '#dc2626';
+  }
+  if (score >= 5) {
+    return '#2563eb';
+  }
+  if (score >= 3) {
+    return '#000000';
+  }
+  return '#ffffff';
+}
+
+export function ringScoreTextColor(fillHex: string): '#000000' | '#FFFFFF' {
+  const hex = fillHex.toLowerCase();
+  if (hex === '#000000' || hex === '#2563eb' || hex === '#dc2626') {
+    return '#FFFFFF';
+  }
+  return '#000000';
 }

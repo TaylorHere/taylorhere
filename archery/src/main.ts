@@ -4,12 +4,15 @@ import {
   diagnoseNoLayoutReason,
   PAGE_PRESETS_MM,
   getTargetCenterMm,
-  ringColorByIndex,
+  ringFillColor,
+  ringScoreByIndex,
+  ringScoreTextColor,
   solveOptimalLayout,
   suggestNearbyFeasibleLayouts,
   type LayoutInput,
   type LayoutSolution,
   type PagePreset,
+  type TargetColorMode,
 } from '../shared/layout';
 
 const PX_PER_MM = 96 / 25.4;
@@ -66,6 +69,19 @@ app.innerHTML = `
           <input id="checkerboard" type="checkbox" checked />
           黑白棋盘交替模式
         </label>
+
+        <label>
+          靶面颜色
+          <select id="target-color-mode">
+            <option value="bw">黑白靶</option>
+            <option value="color">彩色靶</option>
+          </select>
+        </label>
+
+        <label class="inline">
+          <input id="show-ring-scores" type="checkbox" />
+          显示环分数
+        </label>
       </form>
 
       <div class="controls">
@@ -102,6 +118,8 @@ const refs = {
   minSpacing: getEl<HTMLInputElement>('min-spacing'),
   ringCount: getEl<HTMLInputElement>('ring-count'),
   checkerboard: getEl<HTMLInputElement>('checkerboard'),
+  targetColorMode: getEl<HTMLSelectElement>('target-color-mode'),
+  showRingScores: getEl<HTMLInputElement>('show-ring-scores'),
   zoom: getEl<HTMLInputElement>('zoom'),
   zoomLabel: getEl<HTMLSpanElement>('zoom-label'),
   previewStage: getEl<HTMLDivElement>('preview-stage'),
@@ -117,7 +135,9 @@ const refs = {
 
 let currentLayout: LayoutSolution | null = null;
 refs.pagePreset.value = DEFAULT_PAGE_PRESET;
+refs.targetColorMode.value = 'bw';
 toggleCustomSizeInputs();
+toggleCheckerboardAvailability();
 recalculate();
 
 type EditedField = 'page' | 'customWidth' | 'customHeight' | 'diameter' | 'minSpacing' | 'other';
@@ -130,6 +150,8 @@ for (const el of [
   refs.minSpacing,
   refs.ringCount,
   refs.checkerboard,
+  refs.targetColorMode,
+  refs.showRingScores,
   refs.zoom,
 ]) {
   el.addEventListener('input', () => {
@@ -137,6 +159,9 @@ for (const el of [
     if (el === refs.pagePreset) {
       applyPresetToCustomInputs();
       toggleCustomSizeInputs();
+    }
+    if (el === refs.targetColorMode) {
+      toggleCheckerboardAvailability();
     }
     recalculate(editedField);
   });
@@ -155,6 +180,8 @@ refs.downloadBtn.addEventListener('click', async () => {
     diameterMm: getPositiveNumber(refs.diameter),
     ringCount: getPositiveInteger(refs.ringCount),
     checkerboardEnabled: refs.checkerboard.checked,
+    colorMode: getTargetColorMode(),
+    showRingScores: refs.showRingScores.checked,
     layout: currentLayout,
   });
   refs.status.textContent = 'PDF 已生成：矢量图可直接打印，请使用 100% 缩放。';
@@ -396,8 +423,11 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
   }
 
   const ringCount = getPositiveInteger(refs.ringCount);
-  const checkerboardEnabled = refs.checkerboard.checked;
+  const colorMode = getTargetColorMode();
+  const checkerboardEnabled = colorMode === 'bw' && refs.checkerboard.checked;
+  const showRingScores = refs.showRingScores.checked;
   const circles: string[] = [];
+  const scoreLabels: string[] = [];
 
   for (let row = 0; row < layout.rows; row += 1) {
     for (let col = 0; col < layout.columns; col += 1) {
@@ -405,11 +435,30 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
       const startWithBlack = checkerboardEnabled ? (row + col) % 2 === 0 : true;
 
       for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
-        const radiusMm = (input.targetDiameterMm / 2) * ((ringCount - ringIndex) / ringCount);
-        const fill = ringColorByIndex(ringIndex, startWithBlack);
-        const outerStroke = ringIndex === 0 ? ' stroke="#000" stroke-width="0.15"' : '';
+        const outerRadiusMm = (input.targetDiameterMm / 2) * ((ringCount - ringIndex) / ringCount);
+        const innerRadiusMm =
+          ringIndex === ringCount - 1 ? 0 : (input.targetDiameterMm / 2) * ((ringCount - ringIndex - 1) / ringCount);
+        const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack);
         circles.push(
-          `<circle cx="${center.x}" cy="${center.y}" r="${radiusMm}" fill="${fill}"${outerStroke} vector-effect="non-scaling-stroke" />`,
+          `<circle cx="${center.x}" cy="${center.y}" r="${outerRadiusMm}" fill="${fill}" stroke="#000" stroke-width="0.1" vector-effect="non-scaling-stroke" />`,
+        );
+
+        if (!showRingScores) {
+          continue;
+        }
+
+        const bandThicknessMm = outerRadiusMm - innerRadiusMm;
+        if (bandThicknessMm < 0.9) {
+          continue;
+        }
+
+        const score = ringScoreByIndex(ringIndex, ringCount);
+        const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
+        const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
+        const labelY = center.y - labelRadiusMm + fontSizeMm * 0.35;
+        const textColor = ringScoreTextColor(fill);
+        scoreLabels.push(
+          `<text x="${center.x}" y="${labelY}" text-anchor="middle" font-size="${fontSizeMm}" fill="${textColor}" font-weight="600">${score}</text>`,
         );
       }
     }
@@ -431,6 +480,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
     >
       <rect x="0" y="0" width="${input.pageWidthMm}" height="${input.pageHeightMm}" fill="#fff" stroke="#999" stroke-width="0.3"/>
       ${circles.join('')}
+      ${scoreLabels.join('')}
       <line x1="${rulerStart}" y1="${rulerY}" x2="${rulerStart + rulerLength}" y2="${rulerY}" stroke="#1d4ed8" stroke-width="0.25" />
       <line x1="${rulerStart}" y1="${rulerY - 1}" x2="${rulerStart}" y2="${rulerY + 1}" stroke="#1d4ed8" stroke-width="0.25" />
       <line x1="${rulerStart + rulerLength}" y1="${rulerY - 1}" x2="${rulerStart + rulerLength}" y2="${rulerY + 1}" stroke="#1d4ed8" stroke-width="0.25" />
@@ -468,6 +518,11 @@ function toggleCustomSizeInputs(): void {
   refs.customHeight.disabled = !isCustom;
 }
 
+function toggleCheckerboardAvailability(): void {
+  const isColorMode = getTargetColorMode() === 'color';
+  refs.checkerboard.disabled = isColorMode;
+}
+
 function applyPresetToCustomInputs(): void {
   const preset = refs.pagePreset.value as PagePreset;
   if (preset === 'custom') {
@@ -488,6 +543,10 @@ function getPositiveNumber(input: HTMLInputElement): number {
 
 function getPositiveInteger(input: HTMLInputElement): number {
   return Math.max(1, Math.round(getPositiveNumber(input)));
+}
+
+function getTargetColorMode(): TargetColorMode {
+  return refs.targetColorMode.value === 'color' ? 'color' : 'bw';
 }
 
 function getEl<T extends HTMLElement>(id: string): T {
