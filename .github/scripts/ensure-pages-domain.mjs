@@ -24,7 +24,6 @@ for (const [key, value] of Object.entries(required)) {
 
 const API_BASE = 'https://api.cloudflare.com/client/v4';
 const DNS_TOKEN = CF_DNS_API_TOKEN || CF_API_TOKEN;
-// Bump marker to trigger workflows when testing permissions.
 
 class DnsAuthError extends Error {}
 
@@ -97,6 +96,18 @@ async function ensurePagesDomainBinding() {
   throw new Error(`Failed ensuring Pages custom domain:\n${stringifyError(result.data)}`);
 }
 
+async function getPagesProjectSubdomain() {
+  const project = await cfRequest('GET', `/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}`);
+  if (!project.ok) {
+    throw new Error(`Failed getting Pages project info:\n${stringifyError(project.data)}`);
+  }
+
+  const subdomain = project.data?.result?.subdomain;
+  if (!subdomain) {
+    throw new Error('Pages project subdomain not found in API response.');
+  }
+  return subdomain;
+}
 async function getPagesDomainDetails() {
   const detail = await cfRequest(
     'GET',
@@ -188,7 +199,7 @@ async function upsertDnsRecord(zoneId, record) {
 
 async function ensureDnsForCustomDomain() {
   const zoneId = await ensureZoneId();
-  const target = CF_TARGET_DOMAIN || `${CF_PROJECT_NAME}.pages.dev`;
+  const target = CF_TARGET_DOMAIN || (await getPagesProjectSubdomain());
   const record = {
     type: 'CNAME',
     name: normalizeRecordName(CF_CUSTOM_DOMAIN),

@@ -76,5 +76,4 @@ jobs:
           CF_PROJECT_NAME: archery
           CF_CUSTOM_DOMAIN: ${{ env.ARCHERY_CUSTOM_DOMAIN }}
           CF_ZONE_NAME: taylorhere.com
-          CF_TARGET_DOMAIN: archery.pages.dev
         run: node .github/scripts/ensure-pages-domain.mjs
