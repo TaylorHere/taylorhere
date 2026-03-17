@@ -17,8 +17,8 @@ function mmToPt(mm: number): number {
 }
 
 function triggerBrowserDownload(bytes: Uint8Array, fileName: string): void {
-  const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-  const blob = new Blob([arrayBuffer], { type: 'application/pdf' });
+  const safeBytes = new Uint8Array(bytes);
+  const blob = new Blob([safeBytes.buffer], { type: 'application/pdf' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
