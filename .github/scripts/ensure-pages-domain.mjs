@@ -1,5 +1,6 @@
 const {
   CF_API_TOKEN,
+  CF_DNS_API_TOKEN,
   CF_ACCOUNT_ID,
   CF_PROJECT_NAME,
   CF_CUSTOM_DOMAIN,
@@ -22,12 +23,15 @@ for (const [key, value] of Object.entries(required)) {
 }
 
 const API_BASE = 'https://api.cloudflare.com/client/v4';
+const DNS_TOKEN = CF_DNS_API_TOKEN || CF_API_TOKEN;
 
-async function cfRequest(method, path, body) {
+class DnsAuthError extends Error {}
+
+async function cfRequest(method, path, body, token = CF_API_TOKEN) {
   const response = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
-      Authorization: `Bearer ${CF_API_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -51,6 +55,15 @@ function hasAlreadyExistsError(payload) {
     const code = Number(e?.code);
     const message = String(e?.message ?? '');
     return code === 8000018 || /already exists/i.test(message) || /already added this custom domain/i.test(message);
+  });
+}
+
+function hasAuthError(payload) {
+  const errors = payload?.errors ?? [];
+  return errors.some((e) => {
+    const code = Number(e?.code);
+    const message = String(e?.message ?? '');
+    return code === 10000 || /authentication/i.test(message);
   });
 }
 
@@ -83,11 +96,33 @@ async function ensurePagesDomainBinding() {
   throw new Error(`Failed ensuring Pages custom domain:\n${stringifyError(result.data)}`);
 }
 
+async function getPagesDomainDetails() {
+  const detail = await cfRequest(
+    'GET',
+    `/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}/domains/${encodeURIComponent(CF_CUSTOM_DOMAIN)}`,
+  );
+  if (!detail.ok) {
+    return null;
+  }
+  return detail.data?.result ?? null;
+}
+
+function isDomainActive(details) {
+  if (!details) return false;
+  const text = JSON.stringify(details).toLowerCase();
+  return text.includes('"status":"active"') || text.includes('"status":"verified"');
+}
+
 async function ensureZoneId() {
   const zoneResponse = await cfRequest(
     'GET',
     `/zones?name=${encodeURIComponent(CF_ZONE_NAME)}&per_page=1`,
+    undefined,
+    DNS_TOKEN,
   );
+  if (!zoneResponse.ok && hasAuthError(zoneResponse.data)) {
+    throw new DnsAuthError('Token lacks Zone Read permission for DNS automation.');
+  }
   if (!zoneResponse.ok || !zoneResponse.data?.result?.length) {
     throw new Error(
       `Unable to locate zone "${CF_ZONE_NAME}". Check token scopes (Zone Read).\n${stringifyError(zoneResponse.data)}`,
@@ -100,7 +135,12 @@ async function upsertDnsRecord(zoneId, record) {
   const list = await cfRequest(
     'GET',
     `/zones/${zoneId}/dns_records?name=${encodeURIComponent(record.name)}&per_page=100`,
+    undefined,
+    DNS_TOKEN,
   );
+  if (!list.ok && hasAuthError(list.data)) {
+    throw new DnsAuthError('Token lacks DNS Edit/Read permission for DNS automation.');
+  }
   if (!list.ok) {
     throw new Error(`Failed querying DNS records:\n${stringifyError(list.data)}`);
   }
@@ -108,7 +148,10 @@ async function upsertDnsRecord(zoneId, record) {
   const existing = list.data.result ?? [];
   const sameType = existing.find((r) => r.type === record.type);
   if (sameType) {
-    const update = await cfRequest('PATCH', `/zones/${zoneId}/dns_records/${sameType.id}`, record);
+    const update = await cfRequest('PATCH', `/zones/${zoneId}/dns_records/${sameType.id}`, record, DNS_TOKEN);
+    if (!update.ok && hasAuthError(update.data)) {
+      throw new DnsAuthError('Token lacks DNS Edit permission for DNS automation.');
+    }
     if (!update.ok) {
       throw new Error(`Failed updating DNS record:\n${stringifyError(update.data)}`);
     }
@@ -120,7 +163,10 @@ async function upsertDnsRecord(zoneId, record) {
   if (record.type === 'CNAME') {
     for (const conflict of existing) {
       if (['A', 'AAAA', 'CNAME'].includes(conflict.type)) {
-        const del = await cfRequest('DELETE', `/zones/${zoneId}/dns_records/${conflict.id}`);
+        const del = await cfRequest('DELETE', `/zones/${zoneId}/dns_records/${conflict.id}`, undefined, DNS_TOKEN);
+        if (!del.ok && hasAuthError(del.data)) {
+          throw new DnsAuthError('Token lacks DNS Edit permission for DNS automation.');
+        }
         if (!del.ok) {
           throw new Error(`Failed deleting conflicting DNS record:\n${stringifyError(del.data)}`);
         }
@@ -129,7 +175,10 @@ async function upsertDnsRecord(zoneId, record) {
     }
   }
 
-  const create = await cfRequest('POST', `/zones/${zoneId}/dns_records`, record);
+  const create = await cfRequest('POST', `/zones/${zoneId}/dns_records`, record, DNS_TOKEN);
+  if (!create.ok && hasAuthError(create.data)) {
+    throw new DnsAuthError('Token lacks DNS Edit permission for DNS automation.');
+  }
   if (!create.ok) {
     throw new Error(`Failed creating DNS record:\n${stringifyError(create.data)}`);
   }
@@ -152,7 +201,26 @@ async function ensureDnsForCustomDomain() {
 
 async function main() {
   await ensurePagesDomainBinding();
-  await ensureDnsForCustomDomain();
+  const details = await getPagesDomainDetails();
+
+  try {
+    await ensureDnsForCustomDomain();
+  } catch (error) {
+    if (error instanceof DnsAuthError) {
+      if (isDomainActive(details)) {
+        console.warn(`DNS API permission missing, but domain is already active in Pages: ${CF_CUSTOM_DOMAIN}`);
+      } else {
+        throw new Error(
+          `DNS automation requires token scopes: Zone Read + DNS Edit. ` +
+            `Set secret CLOUDFLARE_DNS_API_TOKEN (recommended) or extend CLOUDFLARE_API_TOKEN.\n` +
+            `Original: ${error.message}`,
+        );
+      }
+    } else {
+      throw error;
+    }
+  }
+
   console.log(`Custom domain fully ensured: ${CF_CUSTOM_DOMAIN}`);
 }
 

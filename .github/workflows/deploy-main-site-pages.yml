@@ -55,6 +55,7 @@ jobs:
       - name: Ensure custom domain and DNS
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CF_PROJECT_NAME: taylorhere
           CF_CUSTOM_DOMAIN: ${{ env.MAIN_CUSTOM_DOMAIN }}
