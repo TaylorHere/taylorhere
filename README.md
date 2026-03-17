@@ -7,5 +7,5 @@
 
 ## Cloudflare 部署变量
 
-- `vars.CLOUDFLARE_MAIN_PAGES_PROJECT`：主站 Pages 项目名（用于 `taylorhere.com`）
+- 主站项目名固定为 `taylorhere`（用于 `taylorhere.com`）
 - `vars.CLOUDFLARE_PAGES_PROJECT`：Archery Pages 项目名（用于 `archery.taylorhere.com`）
