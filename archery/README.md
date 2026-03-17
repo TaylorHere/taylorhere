@@ -11,6 +11,8 @@
 
 ## 1. 功能总览
 
+生产地址（主分支部署后）：`https://archery.taylorhere.com`
+
 ### 前端
 
 - 配置项：
@@ -114,6 +116,9 @@ npm run build
 1. 构建 `archery` 前端
 2. 部署 `archery/dist` 静态资源
 3. 一并部署 `archery/functions` 的 Serverless API
+4. 当主分支部署时，自动确保生产域名为 `archery.taylorhere.com`
+
+> 说明：`CLOUDFLARE_API_TOKEN` 需包含 Pages 项目与域名管理权限（至少覆盖 Pages 编辑权限）。
 
 ---
 
