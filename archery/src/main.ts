@@ -105,7 +105,6 @@ app.innerHTML = `
           <span id="zoom-label">100%</span>
         </label>
         <button id="download-pdf" type="button">下载 PDF（矢量）</button>
-        <button id="verify-api" type="button" class="secondary">后端 API 复核</button>
       </div>
 
       <div class="result" id="result">
@@ -146,7 +145,6 @@ const refs = {
   outTotal: getEl<HTMLElement>('out-total'),
   outPage: getEl<HTMLElement>('out-page'),
   downloadBtn: getEl<HTMLButtonElement>('download-pdf'),
-  verifyApiBtn: getEl<HTMLButtonElement>('verify-api'),
 };
 
 let currentLayout: LayoutSolution | null = null;
@@ -208,34 +206,6 @@ refs.downloadBtn.addEventListener('click', async () => {
     layout: currentLayout,
   });
   refs.status.textContent = 'PDF 已生成：矢量图可直接打印，请使用 100% 缩放。';
-});
-
-refs.verifyApiBtn.addEventListener('click', async () => {
-  const input = buildLayoutInput();
-  refs.status.textContent = '正在请求后端 API 复核...';
-
-  try {
-    const response = await fetch('/api/layout', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-
-    if (!response.ok) {
-      refs.status.textContent = `后端 API 异常：HTTP ${response.status}`;
-      return;
-    }
-
-    const data = (await response.json()) as { ok: boolean; layout: LayoutSolution | null; reason?: string };
-    if (!data.ok || !data.layout) {
-      refs.status.textContent = `后端复核：无可行解。${data.reason ? `原因：${data.reason}` : ''}`;
-      return;
-    }
-
-    refs.status.textContent = `后端复核成功：n=${data.layout.columns}, m=${data.layout.rows}, s=${data.layout.spacingMm.toFixed(4)}mm`;
-  } catch {
-    refs.status.textContent = '后端 API 不可达（本地前端计算仍可使用）。部署到 Cloudflare Pages 后可直接复核。';
-  }
 });
 
 function recalculate(editedField: EditedField = 'other'): void {
@@ -319,17 +289,7 @@ function autoAdjustToFeasible(input: LayoutInput, editedField: EditedField): str
     }
   }
 
-  const customPage = suggestNearestCustomPageForFixedDiameter(input);
-  if (!customPage) {
-    return null;
-  }
-
-  refs.pagePreset.value = 'custom';
-  refs.customWidth.value = `${customPage.widthMm.toFixed(1)}`;
-  refs.customHeight.value = `${customPage.heightMm.toFixed(1)}`;
-  toggleCustomSizeInputs();
-
-  return `已自动切换为自定义页面 ${customPage.widthMm.toFixed(1)} × ${customPage.heightMm.toFixed(1)} mm。`;
+  return null;
 }
 
 function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | null {
@@ -365,54 +325,6 @@ function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | nul
   }
 
   return Number.isFinite(maxSpacing) ? maxSpacing : null;
-}
-
-function suggestNearestCustomPageForFixedDiameter(
-  input: LayoutInput,
-): { widthMm: number; heightMm: number } | null {
-  const W = input.pageWidthMm;
-  const H = input.pageHeightMm;
-  const D = input.targetDiameterMm;
-  const s = input.minSpacingMm;
-  if (!Number.isFinite(W) || !Number.isFinite(H) || !Number.isFinite(D) || !Number.isFinite(s)) {
-    return null;
-  }
-  if (W <= 0 || H <= 0 || D <= 0 || s <= 0) {
-    return null;
-  }
-
-  const nApprox = Math.max(1, Math.round((W - s) / (D + s)));
-  const mApprox = Math.max(1, Math.round((H - s) / (D + s)));
-  const nMin = Math.max(1, nApprox - 8);
-  const nMax = nApprox + 8;
-  const mMin = Math.max(1, mApprox - 8);
-  const mMax = mApprox + 8;
-
-  let best: { widthMm: number; heightMm: number; score: number; total: number } | null = null;
-  for (let n = nMin; n <= nMax; n += 1) {
-    for (let m = mMin; m <= mMax; m += 1) {
-      const widthMm = n * D + (n + 1) * s;
-      const heightMm = m * D + (m + 1) * s;
-      if (widthMm <= 0 || heightMm <= 0) {
-        continue;
-      }
-
-      const score = Math.abs(widthMm - W) + Math.abs(heightMm - H);
-      const total = n * m;
-      if (
-        !best ||
-        score < best.score - EPS ||
-        (Math.abs(score - best.score) <= EPS && total > best.total)
-      ) {
-        best = { widthMm, heightMm, score, total };
-      }
-    }
-  }
-
-  if (!best) {
-    return null;
-  }
-  return { widthMm: best.widthMm, heightMm: best.heightMm };
 }
 
 function resolveEditedField(el: HTMLElement): EditedField {
