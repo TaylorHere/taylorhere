@@ -5,6 +5,8 @@ interface JsonPayload {
   pageHeightMm?: unknown;
   targetDiameterMm?: unknown;
   minSpacingMm?: unknown;
+  layoutMode?: unknown;
+  desiredTargets?: unknown;
 }
 
 export const onRequestPost: PagesFunction = async (context) => {
@@ -15,6 +17,8 @@ export const onRequestPost: PagesFunction = async (context) => {
       pageHeightMm: Number(payload.pageHeightMm),
       targetDiameterMm: Number(payload.targetDiameterMm),
       minSpacingMm: Number(payload.minSpacingMm),
+      layoutMode: payload.layoutMode === 'target_count' ? 'target_count' : 'auto_fill',
+      desiredTargets: payload.desiredTargets === undefined ? undefined : Number(payload.desiredTargets),
     };
 
     const validation = validateInput(input);

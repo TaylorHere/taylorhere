@@ -2,6 +2,7 @@ import './style.css';
 import { exportArcheryPdf } from './pdf';
 import {
   diagnoseNoLayoutReason,
+  type LayoutMode,
   PAGE_PRESETS_MM,
   getTargetCenterMm,
   ringFillColor,
@@ -61,6 +62,19 @@ app.innerHTML = `
         </label>
 
         <label>
+          排布模式
+          <select id="layout-mode">
+            <option value="auto_fill">自动填满（最大数量）</option>
+            <option value="target_count">指定数量（尽量接近）</option>
+          </select>
+        </label>
+
+        <label>
+          目标数量
+          <input id="desired-targets" type="number" step="1" min="1" value="70" />
+        </label>
+
+        <label>
           圆环数量
           <input id="ring-count" type="number" step="1" min="1" value="3" />
         </label>
@@ -116,6 +130,8 @@ const refs = {
   customHeight: getEl<HTMLInputElement>('custom-height'),
   diameter: getEl<HTMLInputElement>('diameter'),
   minSpacing: getEl<HTMLInputElement>('min-spacing'),
+  layoutMode: getEl<HTMLSelectElement>('layout-mode'),
+  desiredTargets: getEl<HTMLInputElement>('desired-targets'),
   ringCount: getEl<HTMLInputElement>('ring-count'),
   checkerboard: getEl<HTMLInputElement>('checkerboard'),
   targetColorMode: getEl<HTMLSelectElement>('target-color-mode'),
@@ -135,8 +151,10 @@ const refs = {
 
 let currentLayout: LayoutSolution | null = null;
 refs.pagePreset.value = DEFAULT_PAGE_PRESET;
+refs.layoutMode.value = 'auto_fill';
 refs.targetColorMode.value = 'bw';
 toggleCustomSizeInputs();
+toggleDesiredTargetsInput();
 toggleCheckerboardAvailability();
 recalculate();
 
@@ -148,6 +166,8 @@ for (const el of [
   refs.customHeight,
   refs.diameter,
   refs.minSpacing,
+  refs.layoutMode,
+  refs.desiredTargets,
   refs.ringCount,
   refs.checkerboard,
   refs.targetColorMode,
@@ -162,6 +182,9 @@ for (const el of [
     }
     if (el === refs.targetColorMode) {
       toggleCheckerboardAvailability();
+    }
+    if (el === refs.layoutMode) {
+      toggleDesiredTargetsInput();
     }
     recalculate(editedField);
   });
@@ -266,7 +289,10 @@ function recalculate(editedField: EditedField = 'other'): void {
   refs.outM.textContent = `${layout.rows}`;
   refs.outS.textContent = layout.spacingMm.toFixed(4);
   refs.outTotal.textContent = `${layout.totalTargets}`;
-  refs.status.textContent = autoAdjustMessage ? `${autoAdjustMessage} 已自动完成可行排布。` : '已完成本地最优排布计算。';
+  const modeStatus = getLayoutModeStatus(layout);
+  refs.status.textContent = autoAdjustMessage
+    ? `${autoAdjustMessage} 已自动完成可行排布。${modeStatus}`
+    : `已完成本地最优排布计算。${modeStatus}`;
   renderSvgPreview(layout, input);
 }
 
@@ -504,11 +530,14 @@ function getPageSize(): { widthMm: number; heightMm: number } {
 
 function buildLayoutInput(): LayoutInput {
   const page = getPageSize();
+  const layoutMode = getLayoutMode();
   return {
     pageWidthMm: page.widthMm,
     pageHeightMm: page.heightMm,
     targetDiameterMm: getPositiveNumber(refs.diameter),
     minSpacingMm: getPositiveNumber(refs.minSpacing),
+    layoutMode,
+    desiredTargets: layoutMode === 'target_count' ? getPositiveInteger(refs.desiredTargets) : undefined,
   };
 }
 
@@ -516,6 +545,11 @@ function toggleCustomSizeInputs(): void {
   const isCustom = refs.pagePreset.value === 'custom';
   refs.customWidth.disabled = !isCustom;
   refs.customHeight.disabled = !isCustom;
+}
+
+function toggleDesiredTargetsInput(): void {
+  const isTargetCountMode = getLayoutMode() === 'target_count';
+  refs.desiredTargets.disabled = !isTargetCountMode;
 }
 
 function toggleCheckerboardAvailability(): void {
@@ -547,6 +581,22 @@ function getPositiveInteger(input: HTMLInputElement): number {
 
 function getTargetColorMode(): TargetColorMode {
   return refs.targetColorMode.value === 'color' ? 'color' : 'bw';
+}
+
+function getLayoutMode(): LayoutMode {
+  return refs.layoutMode.value === 'target_count' ? 'target_count' : 'auto_fill';
+}
+
+function getLayoutModeStatus(layout: LayoutSolution): string {
+  if (getLayoutMode() !== 'target_count') {
+    return '';
+  }
+
+  const desired = getPositiveInteger(refs.desiredTargets);
+  if (layout.totalTargets === desired) {
+    return `已满足指定数量 ${desired}。`;
+  }
+  return `指定数量=${desired}，当前可行最接近数量=${layout.totalTargets}。`;
 }
 
 function getEl<T extends HTMLElement>(id: string): T {

@@ -1,11 +1,14 @@
 export type PagePreset = 'A4' | 'A3' | 'custom';
 export type TargetColorMode = 'bw' | 'color';
+export type LayoutMode = 'auto_fill' | 'target_count';
 
 export interface LayoutInput {
   pageWidthMm: number;
   pageHeightMm: number;
   targetDiameterMm: number;
   minSpacingMm: number;
+  layoutMode?: LayoutMode;
+  desiredTargets?: number;
 }
 
 export interface LayoutSolution {
@@ -46,6 +49,14 @@ export function validateInput(input: LayoutInput): ValidationResult {
     }
   }
 
+  const mode = normalizeLayoutMode(input.layoutMode);
+  if (mode === 'target_count') {
+    const desiredTargets = Number(input.desiredTargets);
+    if (!Number.isFinite(desiredTargets) || desiredTargets <= 0) {
+      return { ok: false, reason: '指定数量模式下 desiredTargets 必须是大于 0 的数字' };
+    }
+  }
+
   return { ok: true };
 }
 
@@ -66,7 +77,7 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
     return null;
   }
 
-  let best: LayoutSolution | null = null;
+  const candidates: LayoutSolution[] = [];
 
   // 穷举整数列数 n、行数 m，严格约束同一个 s 同时满足宽高公式：
   // W = nD + (n+1)s
@@ -99,25 +110,20 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
         totalTargets,
       };
 
-      if (!best) {
-        best = candidate;
-        continue;
-      }
-
-      // 主目标：最大化数量。并列时优先更大间距，再优先更多列（使预览更“横向密集”）。
-      if (
-        candidate.totalTargets > best.totalTargets ||
-        (candidate.totalTargets === best.totalTargets && candidate.spacingMm > best.spacingMm + EPS) ||
-        (candidate.totalTargets === best.totalTargets &&
-          Math.abs(candidate.spacingMm - best.spacingMm) <= EPS &&
-          candidate.columns > best.columns)
-      ) {
-        best = candidate;
-      }
+      candidates.push(candidate);
     }
   }
 
-  return best;
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const mode = normalizeLayoutMode(input.layoutMode);
+  if (mode === 'target_count') {
+    return pickClosestByDesiredTargets(candidates, Math.max(1, Math.round(Number(input.desiredTargets))));
+  }
+
+  return pickAutoFillBest(candidates);
 }
 
 export function diagnoseNoLayoutReason(input: LayoutInput): string {
@@ -303,4 +309,61 @@ export function ringScoreTextColor(fillHex: string): '#000000' | '#FFFFFF' {
     return '#FFFFFF';
   }
   return '#000000';
+}
+
+function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
+  return mode === 'target_count' ? 'target_count' : 'auto_fill';
+}
+
+function pickAutoFillBest(candidates: LayoutSolution[]): LayoutSolution {
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    if (
+      candidate.totalTargets > best.totalTargets ||
+      (candidate.totalTargets === best.totalTargets && candidate.spacingMm > best.spacingMm + EPS) ||
+      (candidate.totalTargets === best.totalTargets &&
+        Math.abs(candidate.spacingMm - best.spacingMm) <= EPS &&
+        candidate.columns > best.columns)
+    ) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
+function pickClosestByDesiredTargets(candidates: LayoutSolution[], desiredTargets: number): LayoutSolution {
+  let best = candidates[0];
+  for (let i = 1; i < candidates.length; i += 1) {
+    const candidate = candidates[i];
+    const candidateDiff = Math.abs(candidate.totalTargets - desiredTargets);
+    const bestDiff = Math.abs(best.totalTargets - desiredTargets);
+    if (candidateDiff < bestDiff - EPS) {
+      best = candidate;
+      continue;
+    }
+    if (Math.abs(candidateDiff - bestDiff) > EPS) {
+      continue;
+    }
+
+    // 差距相同，优先不低于目标数量。
+    const candidateMeetsTarget = candidate.totalTargets >= desiredTargets;
+    const bestMeetsTarget = best.totalTargets >= desiredTargets;
+    if (candidateMeetsTarget && !bestMeetsTarget) {
+      best = candidate;
+      continue;
+    }
+    if (!candidateMeetsTarget && bestMeetsTarget) {
+      continue;
+    }
+
+    // 再并列时优先更大间距和更多列。
+    if (
+      candidate.spacingMm > best.spacingMm + EPS ||
+      (Math.abs(candidate.spacingMm - best.spacingMm) <= EPS && candidate.columns > best.columns)
+    ) {
+      best = candidate;
+    }
+  }
+  return best;
 }
