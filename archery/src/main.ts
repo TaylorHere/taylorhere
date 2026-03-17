@@ -6,6 +6,7 @@ import {
   getTargetCenterMm,
   ringColorByIndex,
   solveOptimalLayout,
+  suggestNearbyFeasibleLayouts,
   type LayoutInput,
   type LayoutSolution,
   type PagePreset,
@@ -197,7 +198,24 @@ function recalculate(): void {
     refs.outM.textContent = '-';
     refs.outS.textContent = '-';
     refs.outTotal.textContent = '0';
-    refs.status.textContent = diagnoseNoLayoutReason(input);
+    const reason = diagnoseNoLayoutReason(input);
+    const suggestions = suggestNearbyFeasibleLayouts(input, {
+      limit: 3,
+      stepMm: 0.1,
+      maxDeltaMm: 20,
+      minDiameterMm: 1,
+    });
+    if (suggestions.length > 0) {
+      const formatted = suggestions
+        .map(
+          (item, idx) =>
+            `${idx + 1}) D=${item.diameterMm.toFixed(1)}mm（n=${item.layout.columns}, m=${item.layout.rows}, s=${item.layout.spacingMm.toFixed(2)}mm）`,
+        )
+        .join('；');
+      refs.status.textContent = `${reason} 附近可行参数建议：${formatted}`;
+    } else {
+      refs.status.textContent = `${reason} 附近 ±20mm 未找到可行直径，建议切换页面尺寸后重试。`;
+    }
     renderSvgPreview(null, input);
     return;
   }

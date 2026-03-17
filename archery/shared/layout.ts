@@ -14,6 +14,11 @@ export interface LayoutSolution {
   totalTargets: number;
 }
 
+export interface NearbyLayoutSuggestion {
+  diameterMm: number;
+  layout: LayoutSolution;
+}
+
 export interface ValidationResult {
   ok: boolean;
   reason?: string;
@@ -163,6 +168,83 @@ export function diagnoseNoLayoutReason(input: LayoutInput): string {
   return `存在严格对称解，但可行间距上限约为 ${maxFeasibleSpacing.toFixed(4)} mm，小于当前 s_min=${sMin.toFixed(
     4,
   )} mm。请减小 s_min。`;
+}
+
+export function suggestNearbyFeasibleLayouts(
+  input: LayoutInput,
+  options?: {
+    limit?: number;
+    stepMm?: number;
+    maxDeltaMm?: number;
+    minDiameterMm?: number;
+  },
+): NearbyLayoutSuggestion[] {
+  const pageValidation: Array<number> = [input.pageWidthMm, input.pageHeightMm, input.minSpacingMm];
+  for (const value of pageValidation) {
+    if (!Number.isFinite(value) || value <= 0) {
+      return [];
+    }
+  }
+
+  const limit = Math.max(1, Math.round(options?.limit ?? 3));
+  const stepMm = Math.max(0.01, options?.stepMm ?? 0.1);
+  const maxDeltaMm = Math.max(stepMm, options?.maxDeltaMm ?? 20);
+  const minDiameterMm = Math.max(0.1, options?.minDiameterMm ?? 1);
+  const maxDiameterMm = Math.min(input.pageWidthMm, input.pageHeightMm) - input.minSpacingMm - EPS;
+  if (maxDiameterMm < minDiameterMm) {
+    return [];
+  }
+
+  const baseDiameter = Number.isFinite(input.targetDiameterMm) ? input.targetDiameterMm : minDiameterMm;
+  const visited = new Set<string>();
+  const results: NearbyLayoutSuggestion[] = [];
+
+  const tryDiameter = (diameterMm: number): void => {
+    const normalized = Number(diameterMm.toFixed(4));
+    if (normalized < minDiameterMm - EPS || normalized > maxDiameterMm + EPS) {
+      return;
+    }
+    const key = normalized.toFixed(4);
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+
+    const layout = solveOptimalLayout({
+      ...input,
+      targetDiameterMm: normalized,
+    });
+    if (layout) {
+      results.push({ diameterMm: normalized, layout });
+    }
+  };
+
+  const stepCount = Math.ceil(maxDeltaMm / stepMm);
+  for (let i = 0; i <= stepCount && results.length < limit; i += 1) {
+    if (i === 0) {
+      tryDiameter(baseDiameter);
+      continue;
+    }
+
+    const delta = i * stepMm;
+    tryDiameter(baseDiameter - delta);
+    if (results.length >= limit) {
+      break;
+    }
+    tryDiameter(baseDiameter + delta);
+  }
+
+  return results.sort((a, b) => {
+    const deltaA = Math.abs(a.diameterMm - baseDiameter);
+    const deltaB = Math.abs(b.diameterMm - baseDiameter);
+    if (Math.abs(deltaA - deltaB) > EPS) {
+      return deltaA - deltaB;
+    }
+    if (a.layout.totalTargets !== b.layout.totalTargets) {
+      return b.layout.totalTargets - a.layout.totalTargets;
+    }
+    return b.layout.spacingMm - a.layout.spacingMm;
+  });
 }
 
 export function getTargetCenterMm(
