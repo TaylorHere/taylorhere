@@ -14,6 +14,7 @@ import {
 
 const PX_PER_MM = 96 / 25.4;
 const DEFAULT_PAGE_PRESET: PagePreset = 'A4';
+const EPS = 1e-7;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -119,6 +120,8 @@ refs.pagePreset.value = DEFAULT_PAGE_PRESET;
 toggleCustomSizeInputs();
 recalculate();
 
+type EditedField = 'page' | 'customWidth' | 'customHeight' | 'diameter' | 'minSpacing' | 'other';
+
 for (const el of [
   refs.pagePreset,
   refs.customWidth,
@@ -130,11 +133,12 @@ for (const el of [
   refs.zoom,
 ]) {
   el.addEventListener('input', () => {
+    const editedField = resolveEditedField(el);
     if (el === refs.pagePreset) {
       applyPresetToCustomInputs();
       toggleCustomSizeInputs();
     }
-    recalculate();
+    recalculate(editedField);
   });
 }
 
@@ -184,11 +188,22 @@ refs.verifyApiBtn.addEventListener('click', async () => {
   }
 });
 
-function recalculate(): void {
-  const pageSize = getPageSize();
-  const input = buildLayoutInput();
-  const layout = solveOptimalLayout(input);
+function recalculate(editedField: EditedField = 'other'): void {
+  let input = buildLayoutInput();
+  let layout = solveOptimalLayout(input);
+  let autoAdjustMessage = '';
+
+  if (!layout && editedField !== 'other') {
+    const adjusted = autoAdjustToFeasible(input, editedField);
+    if (adjusted) {
+      autoAdjustMessage = adjusted;
+      input = buildLayoutInput();
+      layout = solveOptimalLayout(input);
+    }
+  }
+
   currentLayout = layout;
+  const pageSize = getPageSize();
 
   refs.zoomLabel.textContent = `${Math.round(getPositiveNumber(refs.zoom))}%`;
   refs.outPage.textContent = `${pageSize.widthMm.toFixed(1)} × ${pageSize.heightMm.toFixed(1)} mm`;
@@ -224,8 +239,146 @@ function recalculate(): void {
   refs.outM.textContent = `${layout.rows}`;
   refs.outS.textContent = layout.spacingMm.toFixed(4);
   refs.outTotal.textContent = `${layout.totalTargets}`;
-  refs.status.textContent = '已完成本地最优排布计算。';
+  refs.status.textContent = autoAdjustMessage ? `${autoAdjustMessage} 已自动完成可行排布。` : '已完成本地最优排布计算。';
   renderSvgPreview(layout, input);
+}
+
+function autoAdjustToFeasible(input: LayoutInput, editedField: EditedField): string | null {
+  if (editedField !== 'minSpacing') {
+    const maxSpacing = getMaxStrictSpacingForCurrentDiameter(input);
+    if (maxSpacing !== null && maxSpacing + EPS < input.minSpacingMm) {
+      const newMinSpacing = Math.max(0.1, Number(maxSpacing.toFixed(4)));
+      refs.minSpacing.value = `${newMinSpacing}`;
+      return `已自动将 s_min 调整为 ${newMinSpacing.toFixed(4)} mm。`;
+    }
+  }
+
+  if (editedField !== 'diameter') {
+    const [nearest] = suggestNearbyFeasibleLayouts(input, {
+      limit: 1,
+      stepMm: 0.1,
+      maxDeltaMm: 40,
+      minDiameterMm: 1,
+    });
+    if (nearest) {
+      refs.diameter.value = `${nearest.diameterMm.toFixed(1)}`;
+      return `已自动将 D 调整为 ${nearest.diameterMm.toFixed(1)} mm。`;
+    }
+  }
+
+  const customPage = suggestNearestCustomPageForFixedDiameter(input);
+  if (!customPage) {
+    return null;
+  }
+
+  refs.pagePreset.value = 'custom';
+  refs.customWidth.value = `${customPage.widthMm.toFixed(1)}`;
+  refs.customHeight.value = `${customPage.heightMm.toFixed(1)}`;
+  toggleCustomSizeInputs();
+
+  return `已自动切换为自定义页面 ${customPage.widthMm.toFixed(1)} × ${customPage.heightMm.toFixed(1)} mm。`;
+}
+
+function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | null {
+  const W = input.pageWidthMm;
+  const H = input.pageHeightMm;
+  const D = input.targetDiameterMm;
+  if (!Number.isFinite(W) || !Number.isFinite(H) || !Number.isFinite(D) || W <= 0 || H <= 0 || D <= 0) {
+    return null;
+  }
+
+  const maxColumns = Math.floor((W - EPS) / D);
+  const maxRows = Math.floor((H - EPS) / D);
+  if (maxColumns < 1 || maxRows < 1) {
+    return null;
+  }
+
+  let maxSpacing = -Infinity;
+  for (let n = 1; n <= maxColumns; n += 1) {
+    for (let m = 1; m <= maxRows; m += 1) {
+      const spacingFromWidth = (W - n * D) / (n + 1);
+      const spacingFromHeight = (H - m * D) / (m + 1);
+      if (spacingFromWidth <= EPS || spacingFromHeight <= EPS) {
+        continue;
+      }
+      if (Math.abs(spacingFromWidth - spacingFromHeight) > EPS) {
+        continue;
+      }
+      const spacingMm = (spacingFromWidth + spacingFromHeight) / 2;
+      if (spacingMm > maxSpacing) {
+        maxSpacing = spacingMm;
+      }
+    }
+  }
+
+  return Number.isFinite(maxSpacing) ? maxSpacing : null;
+}
+
+function suggestNearestCustomPageForFixedDiameter(
+  input: LayoutInput,
+): { widthMm: number; heightMm: number } | null {
+  const W = input.pageWidthMm;
+  const H = input.pageHeightMm;
+  const D = input.targetDiameterMm;
+  const s = input.minSpacingMm;
+  if (!Number.isFinite(W) || !Number.isFinite(H) || !Number.isFinite(D) || !Number.isFinite(s)) {
+    return null;
+  }
+  if (W <= 0 || H <= 0 || D <= 0 || s <= 0) {
+    return null;
+  }
+
+  const nApprox = Math.max(1, Math.round((W - s) / (D + s)));
+  const mApprox = Math.max(1, Math.round((H - s) / (D + s)));
+  const nMin = Math.max(1, nApprox - 8);
+  const nMax = nApprox + 8;
+  const mMin = Math.max(1, mApprox - 8);
+  const mMax = mApprox + 8;
+
+  let best: { widthMm: number; heightMm: number; score: number; total: number } | null = null;
+  for (let n = nMin; n <= nMax; n += 1) {
+    for (let m = mMin; m <= mMax; m += 1) {
+      const widthMm = n * D + (n + 1) * s;
+      const heightMm = m * D + (m + 1) * s;
+      if (widthMm <= 0 || heightMm <= 0) {
+        continue;
+      }
+
+      const score = Math.abs(widthMm - W) + Math.abs(heightMm - H);
+      const total = n * m;
+      if (
+        !best ||
+        score < best.score - EPS ||
+        (Math.abs(score - best.score) <= EPS && total > best.total)
+      ) {
+        best = { widthMm, heightMm, score, total };
+      }
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+  return { widthMm: best.widthMm, heightMm: best.heightMm };
+}
+
+function resolveEditedField(el: HTMLElement): EditedField {
+  if (el === refs.pagePreset) {
+    return 'page';
+  }
+  if (el === refs.customWidth) {
+    return 'customWidth';
+  }
+  if (el === refs.customHeight) {
+    return 'customHeight';
+  }
+  if (el === refs.diameter) {
+    return 'diameter';
+  }
+  if (el === refs.minSpacing) {
+    return 'minSpacing';
+  }
+  return 'other';
 }
 
 function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): void {
