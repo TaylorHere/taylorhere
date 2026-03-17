@@ -4,10 +4,13 @@ import {
   diagnoseNoLayoutReason,
   type LayoutMode,
   PAGE_PRESETS_MM,
+  RING_SCORE_LOG_STRENGTH_DEFAULT,
   getTargetCenterMm,
   ringFillColor,
   ringScoreByIndex,
   ringScoreTextColor,
+  type RingScoreMappingConfig,
+  type RingScoreMappingMode,
   solveOptimalLayout,
   suggestNearbyFeasibleLayouts,
   type LayoutInput,
@@ -95,6 +98,20 @@ app.innerHTML = `
           <input id="ring-count" type="number" step="1" min="1" value="3" />
         </label>
 
+        <label>
+          环分数映射方案
+          <select id="ring-score-mapping">
+            <option value="linear">线性</option>
+            <option value="log">对数</option>
+          </select>
+        </label>
+
+        <label id="log-score-strength-row">
+          对数映射强度
+          <input id="log-score-strength" type="range" min="0" max="100" step="1" value="${RING_SCORE_LOG_STRENGTH_DEFAULT}" />
+          <span id="log-score-strength-label">${RING_SCORE_LOG_STRENGTH_DEFAULT}%</span>
+        </label>
+
         <label class="inline">
           <input id="checkerboard" type="checkbox" checked />
           黑白棋盘交替模式
@@ -152,6 +169,10 @@ const refs = {
   layoutMode: getEl<HTMLSelectElement>('layout-mode'),
   desiredTargets: getEl<HTMLInputElement>('desired-targets'),
   ringCount: getEl<HTMLInputElement>('ring-count'),
+  ringScoreMapping: getEl<HTMLSelectElement>('ring-score-mapping'),
+  logScoreStrengthRow: getEl<HTMLLabelElement>('log-score-strength-row'),
+  logScoreStrength: getEl<HTMLInputElement>('log-score-strength'),
+  logScoreStrengthLabel: getEl<HTMLSpanElement>('log-score-strength-label'),
   checkerboard: getEl<HTMLInputElement>('checkerboard'),
   targetColorMode: getEl<HTMLSelectElement>('target-color-mode'),
   showRingScores: getEl<HTMLInputElement>('show-ring-scores'),
@@ -172,10 +193,12 @@ let currentLayout: LayoutSolution | null = null;
 refs.pagePreset.value = DEFAULT_PAGE_PRESET;
 refs.layoutMode.value = 'auto_fill';
 refs.targetColorMode.value = 'bw';
+refs.ringScoreMapping.value = 'linear';
 toggleCustomSizeInputs();
 toggleSpacingModeInputs();
 toggleDesiredTargetsInput();
 toggleCheckerboardAvailability();
+toggleLogScoreStrengthVisibility();
 recalculate();
 
 type EditedField = 'page' | 'customWidth' | 'customHeight' | 'diameter' | 'minSpacing' | 'other';
@@ -192,6 +215,8 @@ for (const el of [
   refs.layoutMode,
   refs.desiredTargets,
   refs.ringCount,
+  refs.ringScoreMapping,
+  refs.logScoreStrength,
   refs.checkerboard,
   refs.targetColorMode,
   refs.showRingScores,
@@ -209,8 +234,14 @@ for (const el of [
     if (el === refs.layoutMode) {
       toggleDesiredTargetsInput();
     }
+    if (el === refs.ringScoreMapping) {
+      toggleLogScoreStrengthVisibility();
+    }
     if (el === refs.autoSpacing) {
       toggleSpacingModeInputs();
+    }
+    if (el === refs.logScoreStrength) {
+      updateLogScoreStrengthLabel();
     }
     recalculate(editedField);
   });
@@ -231,6 +262,8 @@ refs.downloadBtn.addEventListener('click', async () => {
     checkerboardEnabled: refs.checkerboard.checked,
     colorMode: getTargetColorMode(),
     showRingScores: refs.showRingScores.checked,
+    ringScoreMappingMode: getRingScoreMappingMode(),
+    ringScoreLogStrength: getRingScoreLogStrength(),
     layout: currentLayout,
   });
   refs.status.textContent = 'PDF 已生成：矢量图可直接打印，请使用 100% 缩放。';
@@ -401,6 +434,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
   const colorMode = getTargetColorMode();
   const checkerboardEnabled = colorMode === 'bw' && refs.checkerboard.checked;
   const showRingScores = refs.showRingScores.checked;
+  const scoreMappingConfig = getRingScoreMappingConfig();
   const circles: string[] = [];
   const scoreLabels: string[] = [];
 
@@ -413,7 +447,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
         const outerRadiusMm = (input.targetDiameterMm / 2) * ((ringCount - ringIndex) / ringCount);
         const innerRadiusMm =
           ringIndex === ringCount - 1 ? 0 : (input.targetDiameterMm / 2) * ((ringCount - ringIndex - 1) / ringCount);
-        const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack);
+        const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack, scoreMappingConfig);
         circles.push(
           `<circle cx="${centerWithMargin.x}" cy="${centerWithMargin.y}" r="${outerRadiusMm}" fill="${fill}" stroke="#000" stroke-width="0.1" vector-effect="non-scaling-stroke" />`,
         );
@@ -427,7 +461,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
           continue;
         }
 
-        const score = ringScoreByIndex(ringIndex, ringCount);
+        const score = ringScoreByIndex(ringIndex, ringCount, scoreMappingConfig);
         const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
         const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
         const labelY = centerWithMargin.y - labelRadiusMm + fontSizeMm * 0.35;
@@ -517,6 +551,17 @@ function toggleCheckerboardAvailability(): void {
   refs.checkerboard.disabled = isColorMode;
 }
 
+function toggleLogScoreStrengthVisibility(): void {
+  const isLogMode = getRingScoreMappingMode() === 'log';
+  refs.logScoreStrengthRow.style.display = isLogMode ? 'grid' : 'none';
+  refs.logScoreStrength.disabled = !isLogMode;
+  updateLogScoreStrengthLabel();
+}
+
+function updateLogScoreStrengthLabel(): void {
+  refs.logScoreStrengthLabel.textContent = `${Math.round(getRingScoreLogStrength())}%`;
+}
+
 function applyPresetToCustomInputs(): void {
   const preset = refs.pagePreset.value as PagePreset;
   if (preset === 'custom') {
@@ -549,6 +594,29 @@ function getNonNegativeNumber(input: HTMLInputElement): number {
 
 function getTargetColorMode(): TargetColorMode {
   return refs.targetColorMode.value === 'color' ? 'color' : 'bw';
+}
+
+function getRingScoreMappingMode(): RingScoreMappingMode {
+  return refs.ringScoreMapping.value === 'log' ? 'log' : 'linear';
+}
+
+function getRingScoreLogStrength(): number {
+  const parsed = Number(refs.logScoreStrength.value);
+  if (!Number.isFinite(parsed)) {
+    return RING_SCORE_LOG_STRENGTH_DEFAULT;
+  }
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function getRingScoreMappingConfig(): RingScoreMappingConfig {
+  const mode = getRingScoreMappingMode();
+  if (mode === 'linear') {
+    return { mode };
+  }
+  return {
+    mode,
+    logStrength: getRingScoreLogStrength(),
+  };
 }
 
 function getSpacingMode(): SpacingMode {
