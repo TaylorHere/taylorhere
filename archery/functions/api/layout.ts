@@ -1,10 +1,12 @@
-import { solveOptimalLayout, validateInput, type LayoutInput } from '../../shared/layout';
+import { diagnoseNoLayoutReason, solveOptimalLayout, validateInput, type LayoutInput } from '../../shared/layout';
 
 interface JsonPayload {
   pageWidthMm?: unknown;
   pageHeightMm?: unknown;
   targetDiameterMm?: unknown;
   minSpacingMm?: unknown;
+  layoutMode?: unknown;
+  desiredTargets?: unknown;
 }
 
 export const onRequestPost: PagesFunction = async (context) => {
@@ -15,6 +17,8 @@ export const onRequestPost: PagesFunction = async (context) => {
       pageHeightMm: Number(payload.pageHeightMm),
       targetDiameterMm: Number(payload.targetDiameterMm),
       minSpacingMm: Number(payload.minSpacingMm),
+      layoutMode: payload.layoutMode === 'target_count' ? 'target_count' : 'auto_fill',
+      desiredTargets: payload.desiredTargets === undefined ? undefined : Number(payload.desiredTargets),
     };
 
     const validation = validateInput(input);
@@ -34,7 +38,7 @@ export const onRequestPost: PagesFunction = async (context) => {
       return json({
         ok: false,
         layout: null,
-        reason: '当前参数不存在满足严格对称约束的 (n, m, s) 组合',
+        reason: diagnoseNoLayoutReason(input),
       });
     }
 

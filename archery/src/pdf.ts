@@ -1,5 +1,12 @@
 import { PDFDocument, rgb } from 'pdf-lib';
-import { getTargetCenterMm, ringColorByIndex, type LayoutSolution } from '../shared/layout';
+import {
+  getTargetCenterMm,
+  ringFillColor,
+  ringScoreByIndex,
+  ringScoreTextColor,
+  type LayoutSolution,
+  type TargetColorMode,
+} from '../shared/layout';
 
 export interface PdfRenderInput {
   pageWidthMm: number;
@@ -7,6 +14,8 @@ export interface PdfRenderInput {
   diameterMm: number;
   ringCount: number;
   checkerboardEnabled: boolean;
+  colorMode: TargetColorMode;
+  showRingScores: boolean;
   layout: LayoutSolution;
 }
 
@@ -40,20 +49,42 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
       const centerXPt = mmToPt(center.x);
       const centerYPt = pageHeightPt - mmToPt(center.y);
 
-      const startWithBlack = input.checkerboardEnabled ? (row + col) % 2 === 0 : true;
+      const checkerboardEnabled = input.colorMode === 'bw' && input.checkerboardEnabled;
+      const startWithBlack = checkerboardEnabled ? (row + col) % 2 === 0 : true;
       for (let ringIndex = 0; ringIndex < input.ringCount; ringIndex += 1) {
-        const radiusMm = (input.diameterMm / 2) * ((input.ringCount - ringIndex) / input.ringCount);
-        const colorHex = ringColorByIndex(ringIndex, startWithBlack);
-        const isBlack = colorHex === '#000000';
-        const color = isBlack ? rgb(0, 0, 0) : rgb(1, 1, 1);
+        const outerRadiusMm = (input.diameterMm / 2) * ((input.ringCount - ringIndex) / input.ringCount);
+        const innerRadiusMm =
+          ringIndex === input.ringCount - 1 ? 0 : (input.diameterMm / 2) * ((input.ringCount - ringIndex - 1) / input.ringCount);
+        const colorHex = ringFillColor(ringIndex, input.ringCount, input.colorMode, startWithBlack);
+        const color = hexToRgbColor(colorHex);
 
         page.drawCircle({
           x: centerXPt,
           y: centerYPt,
-          size: mmToPt(radiusMm),
+          size: mmToPt(outerRadiusMm),
           color,
-          borderColor: ringIndex === 0 ? rgb(0, 0, 0) : undefined,
-          borderWidth: ringIndex === 0 ? mmToPt(0.15) : 0,
+          borderColor: rgb(0, 0, 0),
+          borderWidth: mmToPt(0.1),
+        });
+
+        if (!input.showRingScores) {
+          continue;
+        }
+
+        const bandThicknessMm = outerRadiusMm - innerRadiusMm;
+        if (bandThicknessMm < 0.9) {
+          continue;
+        }
+
+        const score = ringScoreByIndex(ringIndex, input.ringCount);
+        const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
+        const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
+        const labelColorHex = ringScoreTextColor(colorHex);
+        page.drawText(`${score}`, {
+          x: centerXPt - mmToPt(fontSizeMm * 0.35),
+          y: centerYPt + mmToPt(labelRadiusMm) - mmToPt(fontSizeMm * 0.35),
+          size: mmToPt(fontSizeMm),
+          color: hexToRgbColor(labelColorHex),
         });
       }
     }
@@ -62,4 +93,22 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
   const bytes = await doc.save();
   const fileName = `archery-${input.pageWidthMm}x${input.pageHeightMm}-${input.diameterMm}mm.pdf`;
   triggerBrowserDownload(bytes, fileName);
+}
+
+function hexToRgbColor(hex: string): ReturnType<typeof rgb> {
+  const normalized = hex.trim().toLowerCase();
+  switch (normalized) {
+    case '#000000':
+      return rgb(0, 0, 0);
+    case '#ffffff':
+      return rgb(1, 1, 1);
+    case '#2563eb':
+      return rgb(37 / 255, 99 / 255, 235 / 255);
+    case '#dc2626':
+      return rgb(220 / 255, 38 / 255, 38 / 255);
+    case '#facc15':
+      return rgb(250 / 255, 204 / 255, 21 / 255);
+    default:
+      return rgb(0, 0, 0);
+  }
 }
