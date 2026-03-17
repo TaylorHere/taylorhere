@@ -42,7 +42,7 @@ export interface ValidationResult {
 const EPS = 1e-7;
 const COLOR_RING_OUTER = '#000000';
 const COLOR_RING_CENTER = '#facc15';
-const DEFAULT_RING_SCORE_LOG_STRENGTH = 20;
+const DEFAULT_RING_SCORE_LOG_STRENGTH = 10;
 export const RING_SCORE_LOG_STRENGTH_DEFAULT = DEFAULT_RING_SCORE_LOG_STRENGTH;
 
 export const PAGE_PRESETS_MM: Record<Exclude<PagePreset, 'custom'>, { width: number; height: number }> = {
