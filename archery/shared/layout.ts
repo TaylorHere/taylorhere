@@ -275,7 +275,17 @@ export function ringColorByIndex(ringIndexFromOuter: number, startWithBlack: boo
 
 export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number): number {
   const safeRingCount = Math.max(1, Math.round(ringCount));
-  return Math.min(safeRingCount, ringIndexFromOuter + 1);
+  const safeIndex = Math.min(safeRingCount - 1, Math.max(0, Math.round(ringIndexFromOuter)));
+  if (safeRingCount === 1) {
+    return 10;
+  }
+  if (safeIndex === 0) {
+    return 1;
+  }
+  if (safeIndex === safeRingCount - 1) {
+    return 10;
+  }
+  return Math.floor(1 + (safeIndex / (safeRingCount - 1)) * 9);
 }
 
 export function ringFillColor(
@@ -304,14 +314,13 @@ export function ringFillColor(
   // 按“分数段 -> 箭靶色板”映射，不做插值：
   // 9-10 黄，7-8 红，5-6 蓝，1-4 黑。
   const score = ringScoreByIndex(safeIndex, safeRingCount);
-  const normalizedScore10 = normalizeScoreToTen(score, safeRingCount);
-  if (normalizedScore10 >= 9) {
+  if (score >= 9) {
     return '#facc15';
   }
-  if (normalizedScore10 >= 7) {
+  if (score >= 7) {
     return '#dc2626';
   }
-  if (normalizedScore10 >= 5) {
+  if (score >= 5) {
     return '#2563eb';
   }
   return '#000000';
@@ -356,12 +365,6 @@ function relativeLuminance(r: number, g: number, b: number): number {
   const gl = toLinear(g);
   const bl = toLinear(b);
   return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
-}
-
-function normalizeScoreToTen(score: number, ringCount: number): number {
-  const safeRingCount = Math.max(1, Math.round(ringCount));
-  const safeScore = Math.min(safeRingCount, Math.max(1, Math.round(score)));
-  return Math.min(10, Math.max(1, Math.round((safeScore / safeRingCount) * 10)));
 }
 
 function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
