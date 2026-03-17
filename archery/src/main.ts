@@ -328,6 +328,7 @@ function recalculate(editedField: EditedField = 'other'): void {
     refs.outS.textContent = '-';
     refs.outTotal.textContent = '0';
     const reason = diagnoseNoLayoutReason(input);
+    const spacingMode = getSpacingMode();
     if (spacingMode === 'manual') {
       refs.status.textContent = reason;
       renderSvgPreview(null, input);
