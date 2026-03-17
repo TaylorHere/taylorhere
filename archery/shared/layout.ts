@@ -29,7 +29,6 @@ export interface ValidationResult {
 }
 
 const EPS = 1e-7;
-const COLOR_RING_PALETTE = ['#000000', '#2563eb', '#dc2626', '#facc15'] as const;
 const COLOR_RING_OUTER = '#000000';
 const COLOR_RING_CENTER = '#facc15';
 
@@ -301,8 +300,21 @@ export function ringFillColor(
   if (safeIndex === safeRingCount - 1) {
     return COLOR_RING_CENTER;
   }
-  const t = safeIndex / (safeRingCount - 1);
-  return interpolatePaletteColor(t, COLOR_RING_PALETTE);
+
+  // 按“分数段 -> 箭靶色板”映射，不做插值：
+  // 9-10 黄，7-8 红，5-6 蓝，1-4 黑。
+  const score = ringScoreByIndex(safeIndex, safeRingCount);
+  const normalizedScore10 = normalizeScoreToTen(score, safeRingCount);
+  if (normalizedScore10 >= 9) {
+    return '#facc15';
+  }
+  if (normalizedScore10 >= 7) {
+    return '#dc2626';
+  }
+  if (normalizedScore10 >= 5) {
+    return '#2563eb';
+  }
+  return '#000000';
 }
 
 export function ringScoreTextColor(fillHex: string): '#000000' | '#FFFFFF' {
@@ -315,35 +327,6 @@ export function ringScoreTextColor(fillHex: string): '#000000' | '#FFFFFF' {
     return '#FFFFFF';
   }
   return '#000000';
-}
-
-function interpolatePaletteColor(t: number, palette: readonly string[]): string {
-  if (palette.length === 0) {
-    return '#000000';
-  }
-  if (palette.length === 1) {
-    return palette[0];
-  }
-
-  const clamped = Math.min(1, Math.max(0, t));
-  const scaled = clamped * (palette.length - 1);
-  const leftIndex = Math.floor(scaled);
-  const rightIndex = Math.min(palette.length - 1, leftIndex + 1);
-  if (leftIndex === rightIndex) {
-    return palette[leftIndex];
-  }
-
-  const left = parseHexRgb(palette[leftIndex]);
-  const right = parseHexRgb(palette[rightIndex]);
-  if (!left || !right) {
-    return palette[leftIndex];
-  }
-
-  const localT = scaled - leftIndex;
-  const r = Math.round(left.r + (right.r - left.r) * localT);
-  const g = Math.round(left.g + (right.g - left.g) * localT);
-  const b = Math.round(left.b + (right.b - left.b) * localT);
-  return rgbToHex(r, g, b);
 }
 
 function parseHexRgb(hex: string): { r: number; g: number; b: number } | null {
@@ -360,15 +343,6 @@ function parseHexRgb(hex: string): { r: number; g: number; b: number } | null {
   };
 }
 
-function rgbToHex(r: number, g: number, b: number): string {
-  return `#${toHexByte(r)}${toHexByte(g)}${toHexByte(b)}`;
-}
-
-function toHexByte(value: number): string {
-  const clamped = Math.min(255, Math.max(0, Math.round(value)));
-  return clamped.toString(16).padStart(2, '0');
-}
-
 function relativeLuminance(r: number, g: number, b: number): number {
   const toLinear = (channel: number): number => {
     const normalized = channel / 255;
@@ -382,6 +356,12 @@ function relativeLuminance(r: number, g: number, b: number): number {
   const gl = toLinear(g);
   const bl = toLinear(b);
   return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
+}
+
+function normalizeScoreToTen(score: number, ringCount: number): number {
+  const safeRingCount = Math.max(1, Math.round(ringCount));
+  const safeScore = Math.min(safeRingCount, Math.max(1, Math.round(score)));
+  return Math.min(10, Math.max(1, Math.round((safeScore / safeRingCount) * 10)));
 }
 
 function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
