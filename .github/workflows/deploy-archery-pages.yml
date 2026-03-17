@@ -1,0 +1,46 @@
+name: Deploy Archery to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+      - cursor/**
+    paths:
+      - "archery/**"
+      - ".github/workflows/deploy-archery-pages.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: archery/package-lock.json
+
+      - name: Install dependencies
+        working-directory: archery
+        run: npm ci
+
+      - name: Build
+        working-directory: archery
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >
+            pages deploy archery/dist
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+            --branch=${{ github.ref_name }}
+            --functions archery/functions

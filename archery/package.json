@@ -1,0 +1,21 @@
+{
+  "name": "archery",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "dev:pages": "vite build && wrangler pages dev dist --functions functions"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vite": "^8.0.0",
+    "wrangler": "^4.75.0"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  }
+}
