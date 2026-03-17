@@ -24,7 +24,6 @@ for (const [key, value] of Object.entries(required)) {
 
 const API_BASE = 'https://api.cloudflare.com/client/v4';
 const DNS_TOKEN = CF_DNS_API_TOKEN || CF_API_TOKEN;
-const USING_DEDICATED_DNS_TOKEN = Boolean(CF_DNS_API_TOKEN && CF_DNS_API_TOKEN !== CF_API_TOKEN);
 
 class DnsAuthError extends Error {}
 
@@ -201,9 +200,6 @@ async function ensureDnsForCustomDomain() {
 }
 
 async function main() {
-  console.log(
-    `DNS token source: ${USING_DEDICATED_DNS_TOKEN ? 'CLOUDFLARE_DNS_API_TOKEN' : 'CLOUDFLARE_API_TOKEN'}`,
-  );
   await ensurePagesDomainBinding();
   const details = await getPagesDomainDetails();
 
