@@ -1,12 +1,16 @@
 export type PagePreset = 'A4' | 'A3' | 'custom';
 export type TargetColorMode = 'bw' | 'color';
 export type LayoutMode = 'auto_fill' | 'target_count';
+export type SpacingMode = 'auto_min' | 'manual';
 
 export interface LayoutInput {
   pageWidthMm: number;
   pageHeightMm: number;
   targetDiameterMm: number;
-  minSpacingMm: number;
+  minSpacingMm?: number;
+  spacingMode?: SpacingMode;
+  manualMarginMm?: number;
+  manualTargetSpacingMm?: number;
   layoutMode?: LayoutMode;
   desiredTargets?: number;
 }
@@ -15,6 +19,7 @@ export interface LayoutSolution {
   columns: number;
   rows: number;
   spacingMm: number;
+  marginMm: number;
   totalTargets: number;
 }
 
@@ -42,12 +47,28 @@ export function validateInput(input: LayoutInput): ValidationResult {
     ['pageWidthMm', input.pageWidthMm],
     ['pageHeightMm', input.pageHeightMm],
     ['targetDiameterMm', input.targetDiameterMm],
-    ['minSpacingMm', input.minSpacingMm],
   ];
 
   for (const [name, value] of values) {
     if (!Number.isFinite(value) || value <= 0) {
       return { ok: false, reason: `${name} 必须是大于 0 的数字` };
+    }
+  }
+
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    const manualMargin = Number(input.manualMarginMm);
+    const manualSpacing = Number(input.manualTargetSpacingMm);
+    if (!Number.isFinite(manualMargin) || manualMargin < 0) {
+      return { ok: false, reason: '手动模式下页边距必须是大于等于 0 的数字' };
+    }
+    if (!Number.isFinite(manualSpacing) || manualSpacing < 0) {
+      return { ok: false, reason: '手动模式下靶间距必须是大于等于 0 的数字' };
+    }
+  } else {
+    const minSpacingMm = Number(input.minSpacingMm);
+    if (!Number.isFinite(minSpacingMm) || minSpacingMm <= 0) {
+      return { ok: false, reason: '自动模式下 minSpacingMm 必须是大于 0 的数字' };
     }
   }
 
@@ -68,10 +89,15 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
     return null;
   }
 
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    return solveManualSpacingLayout(input);
+  }
+
   const W = input.pageWidthMm;
   const H = input.pageHeightMm;
   const D = input.targetDiameterMm;
-  const sMin = input.minSpacingMm;
+  const sMin = Number(input.minSpacingMm);
 
   const maxColumns = Math.floor((W - sMin) / (D + sMin));
   const maxRows = Math.floor((H - sMin) / (D + sMin));
@@ -109,6 +135,7 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
         columns: n,
         rows: m,
         spacingMm,
+        marginMm: spacingMm,
         totalTargets,
       };
 
@@ -134,10 +161,22 @@ export function diagnoseNoLayoutReason(input: LayoutInput): string {
     return validation.reason ?? '参数无效';
   }
 
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    const marginMm = Number(input.manualMarginMm);
+    const D = input.targetDiameterMm;
+    const maxUsableWidth = input.pageWidthMm - 2 * marginMm;
+    const maxUsableHeight = input.pageHeightMm - 2 * marginMm;
+    if (maxUsableWidth < D - EPS || maxUsableHeight < D - EPS) {
+      return '手动页边距过大：当前页面可用区域不足以放下 1 个标靶。请减小页边距或直径。';
+    }
+    return '当前手动页边距/靶间距组合无可行排布。请减小页边距、靶间距或标靶直径。';
+  }
+
   const W = input.pageWidthMm;
   const H = input.pageHeightMm;
   const D = input.targetDiameterMm;
-  const sMin = input.minSpacingMm;
+  const sMin = Number(input.minSpacingMm);
 
   // s > 0 时，必须满足 n·D < W 且 m·D < H。
   const maxColumnsWithPositiveSpacing = Math.floor((W - EPS) / D);
@@ -188,7 +227,12 @@ export function suggestNearbyFeasibleLayouts(
     minDiameterMm?: number;
   },
 ): NearbyLayoutSuggestion[] {
-  const pageValidation: Array<number> = [input.pageWidthMm, input.pageHeightMm, input.minSpacingMm];
+  if (normalizeSpacingMode(input.spacingMode) === 'manual') {
+    return [];
+  }
+
+  const minSpacingMm = Number(input.minSpacingMm);
+  const pageValidation: Array<number> = [input.pageWidthMm, input.pageHeightMm, minSpacingMm];
   for (const value of pageValidation) {
     if (!Number.isFinite(value) || value <= 0) {
       return [];
@@ -199,7 +243,7 @@ export function suggestNearbyFeasibleLayouts(
   const stepMm = Math.max(0.01, options?.stepMm ?? 0.1);
   const maxDeltaMm = Math.max(stepMm, options?.maxDeltaMm ?? 20);
   const minDiameterMm = Math.max(0.1, options?.minDiameterMm ?? 1);
-  const maxDiameterMm = Math.min(input.pageWidthMm, input.pageHeightMm) - input.minSpacingMm - EPS;
+  const maxDiameterMm = Math.min(input.pageWidthMm, input.pageHeightMm) - minSpacingMm - EPS;
   if (maxDiameterMm < minDiameterMm) {
     return [];
   }
@@ -261,10 +305,11 @@ export function getTargetCenterMm(
   row: number,
   diameterMm: number,
   spacingMm: number,
+  marginMm = spacingMm,
 ): { x: number; y: number } {
   return {
-    x: spacingMm + diameterMm / 2 + col * (diameterMm + spacingMm),
-    y: spacingMm + diameterMm / 2 + row * (diameterMm + spacingMm),
+    x: marginMm + diameterMm / 2 + col * (diameterMm + spacingMm),
+    y: marginMm + diameterMm / 2 + row * (diameterMm + spacingMm),
   };
 }
 
@@ -369,6 +414,61 @@ function relativeLuminance(r: number, g: number, b: number): number {
 
 function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
   return mode === 'target_count' ? 'target_count' : 'auto_fill';
+}
+
+function normalizeSpacingMode(mode?: SpacingMode): SpacingMode {
+  return mode === 'manual' ? 'manual' : 'auto_min';
+}
+
+function solveManualSpacingLayout(input: LayoutInput): LayoutSolution | null {
+  const W = input.pageWidthMm;
+  const H = input.pageHeightMm;
+  const D = input.targetDiameterMm;
+  const marginMm = Number(input.manualMarginMm);
+  const spacingMm = Number(input.manualTargetSpacingMm);
+
+  const usableWidth = W - 2 * marginMm;
+  const usableHeight = H - 2 * marginMm;
+  if (usableWidth < D - EPS || usableHeight < D - EPS) {
+    return null;
+  }
+
+  const maxColumns = Math.floor((usableWidth + spacingMm + EPS) / (D + spacingMm));
+  const maxRows = Math.floor((usableHeight + spacingMm + EPS) / (D + spacingMm));
+  if (maxColumns < 1 || maxRows < 1) {
+    return null;
+  }
+
+  const candidates: LayoutSolution[] = [];
+  for (let n = 1; n <= maxColumns; n += 1) {
+    const usedWidth = n * D + (n - 1) * spacingMm;
+    if (usedWidth > usableWidth + EPS) {
+      continue;
+    }
+    for (let m = 1; m <= maxRows; m += 1) {
+      const usedHeight = m * D + (m - 1) * spacingMm;
+      if (usedHeight > usableHeight + EPS) {
+        continue;
+      }
+      candidates.push({
+        columns: n,
+        rows: m,
+        spacingMm,
+        marginMm,
+        totalTargets: n * m,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const mode = normalizeLayoutMode(input.layoutMode);
+  if (mode === 'target_count') {
+    return pickClosestByDesiredTargets(candidates, Math.max(1, Math.round(Number(input.desiredTargets))));
+  }
+  return pickAutoFillBest(candidates);
 }
 
 function pickAutoFillBest(candidates: LayoutSolution[]): LayoutSolution {

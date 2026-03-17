@@ -45,7 +45,7 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
 
   for (let row = 0; row < input.layout.rows; row += 1) {
     for (let col = 0; col < input.layout.columns; col += 1) {
-      const center = getTargetCenterMm(col, row, input.diameterMm, input.layout.spacingMm);
+      const center = getTargetCenterMm(col, row, input.diameterMm, input.layout.spacingMm, input.layout.marginMm);
       const centerXPt = mmToPt(center.x);
       const centerYPt = pageHeightPt - mmToPt(center.y);
 
