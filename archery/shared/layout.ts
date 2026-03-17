@@ -114,6 +114,57 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
   return best;
 }
 
+export function diagnoseNoLayoutReason(input: LayoutInput): string {
+  const validation = validateInput(input);
+  if (!validation.ok) {
+    return validation.reason ?? '参数无效';
+  }
+
+  const W = input.pageWidthMm;
+  const H = input.pageHeightMm;
+  const D = input.targetDiameterMm;
+  const sMin = input.minSpacingMm;
+
+  // s > 0 时，必须满足 n·D < W 且 m·D < H。
+  const maxColumnsWithPositiveSpacing = Math.floor((W - EPS) / D);
+  const maxRowsWithPositiveSpacing = Math.floor((H - EPS) / D);
+  if (maxColumnsWithPositiveSpacing < 1 || maxRowsWithPositiveSpacing < 1) {
+    return '标靶直径过大：页面至少有一个方向连 1 个标靶都无法留出正间距。';
+  }
+
+  let hasExactSymmetricPair = false;
+  let maxFeasibleSpacing = -Infinity;
+
+  for (let n = 1; n <= maxColumnsWithPositiveSpacing; n += 1) {
+    for (let m = 1; m <= maxRowsWithPositiveSpacing; m += 1) {
+      const spacingFromWidth = (W - n * D) / (n + 1);
+      const spacingFromHeight = (H - m * D) / (m + 1);
+
+      if (spacingFromWidth <= EPS || spacingFromHeight <= EPS) {
+        continue;
+      }
+
+      if (Math.abs(spacingFromWidth - spacingFromHeight) > EPS) {
+        continue;
+      }
+
+      hasExactSymmetricPair = true;
+      const spacingMm = (spacingFromWidth + spacingFromHeight) / 2;
+      if (spacingMm > maxFeasibleSpacing) {
+        maxFeasibleSpacing = spacingMm;
+      }
+    }
+  }
+
+  if (!hasExactSymmetricPair) {
+    return '当前页面尺寸与直径组合不存在“同一 s 同时满足宽高公式”的严格对称解（与 s_min 无关）。请优先调整直径 D 或页面尺寸。';
+  }
+
+  return `存在严格对称解，但可行间距上限约为 ${maxFeasibleSpacing.toFixed(4)} mm，小于当前 s_min=${sMin.toFixed(
+    4,
+  )} mm。请减小 s_min。`;
+}
+
 export function getTargetCenterMm(
   col: number,
   row: number,

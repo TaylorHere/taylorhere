@@ -1,4 +1,4 @@
-import { solveOptimalLayout, validateInput, type LayoutInput } from '../../shared/layout';
+import { diagnoseNoLayoutReason, solveOptimalLayout, validateInput, type LayoutInput } from '../../shared/layout';
 
 interface JsonPayload {
   pageWidthMm?: unknown;
@@ -34,7 +34,7 @@ export const onRequestPost: PagesFunction = async (context) => {
       return json({
         ok: false,
         layout: null,
-        reason: '当前参数不存在满足严格对称约束的 (n, m, s) 组合',
+        reason: diagnoseNoLayoutReason(input),
       });
     }
 

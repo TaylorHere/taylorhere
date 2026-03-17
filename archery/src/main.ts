@@ -1,6 +1,7 @@
 import './style.css';
 import { exportArcheryPdf } from './pdf';
 import {
+  diagnoseNoLayoutReason,
   PAGE_PRESETS_MM,
   getTargetCenterMm,
   ringColorByIndex,
@@ -46,7 +47,7 @@ app.innerHTML = `
 
         <label>
           标靶直径 D (mm)
-          <input id="diameter" type="number" step="0.1" min="1" value="28" />
+          <input id="diameter" type="number" step="0.1" min="1" value="22" />
         </label>
 
         <label>
@@ -196,7 +197,7 @@ function recalculate(): void {
     refs.outM.textContent = '-';
     refs.outS.textContent = '-';
     refs.outTotal.textContent = '0';
-    refs.status.textContent = '当前参数无可行排布。可尝试减小 D、减小 s_min 或增大页面尺寸。';
+    refs.status.textContent = diagnoseNoLayoutReason(input);
     renderSvgPreview(null, input);
     return;
   }
