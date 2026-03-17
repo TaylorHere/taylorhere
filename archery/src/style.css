@@ -67,6 +67,10 @@ select {
   padding: 8px 10px;
 }
 
+input[type='range'] {
+  width: 100%;
+}
+
 input:disabled {
   opacity: 0.5;
 }
@@ -75,6 +79,17 @@ input:disabled {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.slider-field {
+  display: grid;
+  gap: 4px;
+}
+
+.slider-value {
+  justify-self: end;
+  font-size: 12px;
+  color: #475569;
 }
 
 .controls {

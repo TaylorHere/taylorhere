@@ -2,6 +2,12 @@ export type PagePreset = 'A4' | 'A3' | 'custom';
 export type TargetColorMode = 'bw' | 'color';
 export type LayoutMode = 'auto_fill' | 'target_count';
 export type SpacingMode = 'auto_min' | 'manual';
+export type RingScoreMappingMode = 'linear' | 'log';
+
+export interface RingScoreMappingConfig {
+  mode?: RingScoreMappingMode;
+  logStrength?: number;
+}
 
 export interface LayoutInput {
   pageWidthMm: number;
@@ -36,6 +42,8 @@ export interface ValidationResult {
 const EPS = 1e-7;
 const COLOR_RING_OUTER = '#000000';
 const COLOR_RING_CENTER = '#facc15';
+const DEFAULT_RING_SCORE_LOG_STRENGTH = 10;
+export const RING_SCORE_LOG_STRENGTH_DEFAULT = DEFAULT_RING_SCORE_LOG_STRENGTH;
 
 export const PAGE_PRESETS_MM: Record<Exclude<PagePreset, 'custom'>, { width: number; height: number }> = {
   A4: { width: 210, height: 297 },
@@ -318,7 +326,11 @@ export function ringColorByIndex(ringIndexFromOuter: number, startWithBlack: boo
   return isBlack ? '#000000' : '#FFFFFF';
 }
 
-export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number): number {
+export function ringScoreByIndex(
+  ringIndexFromOuter: number,
+  ringCount: number,
+  config?: RingScoreMappingConfig,
+): number {
   const safeRingCount = Math.max(1, Math.round(ringCount));
   const safeIndex = Math.min(safeRingCount - 1, Math.max(0, Math.round(ringIndexFromOuter)));
   if (safeRingCount === 1) {
@@ -330,7 +342,11 @@ export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number):
   if (safeIndex === safeRingCount - 1) {
     return 10;
   }
-  return Math.floor(1 + (safeIndex / (safeRingCount - 1)) * 9);
+
+  const progress = safeIndex / (safeRingCount - 1);
+  const mappedProgress = mapRingScoreProgress(progress, config);
+  const mappedScore = Math.floor(1 + mappedProgress * 9);
+  return Math.max(1, Math.min(9, mappedScore));
 }
 
 export function ringFillColor(
@@ -338,6 +354,7 @@ export function ringFillColor(
   ringCount: number,
   colorMode: TargetColorMode,
   startWithBlack: boolean,
+  scoreMappingConfig?: RingScoreMappingConfig,
 ): string {
   if (colorMode === 'bw') {
     return ringColorByIndex(ringIndexFromOuter, startWithBlack);
@@ -358,7 +375,7 @@ export function ringFillColor(
 
   // 按“分数段 -> 箭靶色板”映射，不做插值：
   // 9-10 黄，7-8 红，5-6 蓝，1-4 黑。
-  const score = ringScoreByIndex(safeIndex, safeRingCount);
+  const score = ringScoreByIndex(safeIndex, safeRingCount, scoreMappingConfig);
   if (score >= 9) {
     return '#facc15';
   }
@@ -418,6 +435,37 @@ function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
 
 function normalizeSpacingMode(mode?: SpacingMode): SpacingMode {
   return mode === 'manual' ? 'manual' : 'auto_min';
+}
+
+function mapRingScoreProgress(progress: number, config?: RingScoreMappingConfig): number {
+  const safeProgress = Math.max(0, Math.min(1, progress));
+  const mode = normalizeRingScoreMappingMode(config?.mode);
+  if (mode === 'linear') {
+    return safeProgress;
+  }
+
+  const logStrength = normalizeRingScoreLogStrength(config?.logStrength);
+  if (logStrength <= EPS) {
+    return safeProgress;
+  }
+
+  const curve = (logStrength / 100) * 99;
+  if (curve <= EPS) {
+    return safeProgress;
+  }
+  return Math.log1p(safeProgress * curve) / Math.log1p(curve);
+}
+
+function normalizeRingScoreMappingMode(mode?: RingScoreMappingMode): RingScoreMappingMode {
+  return mode === 'log' ? 'log' : 'linear';
+}
+
+function normalizeRingScoreLogStrength(raw?: number): number {
+  const value = Number(raw);
+  if (!Number.isFinite(value)) {
+    return DEFAULT_RING_SCORE_LOG_STRENGTH;
+  }
+  return Math.min(100, Math.max(0, value));
 }
 
 function solveManualSpacingLayout(input: LayoutInput): LayoutSolution | null {

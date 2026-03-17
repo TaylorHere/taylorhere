@@ -4,10 +4,13 @@ import {
   diagnoseNoLayoutReason,
   type LayoutMode,
   PAGE_PRESETS_MM,
+  RING_SCORE_LOG_STRENGTH_DEFAULT,
   getTargetCenterMm,
   ringFillColor,
   ringScoreByIndex,
   ringScoreTextColor,
+  type RingScoreMappingConfig,
+  type RingScoreMappingMode,
   solveOptimalLayout,
   suggestNearbyFeasibleLayouts,
   type LayoutInput,
@@ -52,14 +55,16 @@ app.innerHTML = `
           <input id="custom-height" type="number" step="0.1" min="1" value="297" />
         </label>
 
-        <label>
+        <label class="slider-field">
           标靶直径 D (mm)
-          <input id="diameter" type="number" step="0.1" min="1" value="22" />
+          <input id="diameter" type="range" step="0.1" min="1" max="120" value="22" />
+          <span id="diameter-value" class="slider-value"></span>
         </label>
 
-        <label>
+        <label class="slider-field">
           最小间距 s_min (mm)
-          <input id="min-spacing" type="number" step="0.1" min="0.1" value="3" />
+          <input id="min-spacing" type="range" step="0.1" min="0.1" max="40" value="3" />
+          <span id="min-spacing-value" class="slider-value"></span>
         </label>
 
         <label class="inline">
@@ -67,14 +72,16 @@ app.innerHTML = `
           按最小间距自动计算页边距/靶间距
         </label>
 
-        <label>
+        <label class="slider-field">
           手动页边距 (mm)
-          <input id="manual-margin" type="number" step="0.1" min="0" value="3" disabled />
+          <input id="manual-margin" type="range" step="0.1" min="0" max="80" value="3" disabled />
+          <span id="manual-margin-value" class="slider-value"></span>
         </label>
 
-        <label>
+        <label class="slider-field">
           手动靶间距 (mm)
-          <input id="manual-target-spacing" type="number" step="0.1" min="0" value="3" disabled />
+          <input id="manual-target-spacing" type="range" step="0.1" min="0" max="80" value="3" disabled />
+          <span id="manual-target-spacing-value" class="slider-value"></span>
         </label>
 
         <label>
@@ -85,14 +92,30 @@ app.innerHTML = `
           </select>
         </label>
 
-        <label>
+        <label class="slider-field">
           目标数量
-          <input id="desired-targets" type="number" step="1" min="1" value="70" />
+          <input id="desired-targets" type="range" step="1" min="1" max="300" value="70" />
+          <span id="desired-targets-value" class="slider-value"></span>
+        </label>
+
+        <label class="slider-field">
+          圆环数量
+          <input id="ring-count" type="range" step="1" min="1" max="12" value="3" />
+          <span id="ring-count-value" class="slider-value"></span>
         </label>
 
         <label>
-          圆环数量
-          <input id="ring-count" type="number" step="1" min="1" value="3" />
+          环分数映射方案
+          <select id="ring-score-mapping">
+            <option value="linear">线性</option>
+            <option value="log">对数</option>
+          </select>
+        </label>
+
+        <label id="log-score-strength-row">
+          对数映射强度
+          <input id="log-score-strength" type="range" min="0" max="100" step="1" value="${RING_SCORE_LOG_STRENGTH_DEFAULT}" />
+          <span id="log-score-strength-label">${RING_SCORE_LOG_STRENGTH_DEFAULT}%</span>
         </label>
 
         <label class="inline">
@@ -145,13 +168,23 @@ const refs = {
   customWidth: getEl<HTMLInputElement>('custom-width'),
   customHeight: getEl<HTMLInputElement>('custom-height'),
   diameter: getEl<HTMLInputElement>('diameter'),
+  diameterValue: getEl<HTMLSpanElement>('diameter-value'),
   minSpacing: getEl<HTMLInputElement>('min-spacing'),
+  minSpacingValue: getEl<HTMLSpanElement>('min-spacing-value'),
   autoSpacing: getEl<HTMLInputElement>('auto-spacing'),
   manualMargin: getEl<HTMLInputElement>('manual-margin'),
+  manualMarginValue: getEl<HTMLSpanElement>('manual-margin-value'),
   manualTargetSpacing: getEl<HTMLInputElement>('manual-target-spacing'),
+  manualTargetSpacingValue: getEl<HTMLSpanElement>('manual-target-spacing-value'),
   layoutMode: getEl<HTMLSelectElement>('layout-mode'),
   desiredTargets: getEl<HTMLInputElement>('desired-targets'),
+  desiredTargetsValue: getEl<HTMLSpanElement>('desired-targets-value'),
   ringCount: getEl<HTMLInputElement>('ring-count'),
+  ringCountValue: getEl<HTMLSpanElement>('ring-count-value'),
+  ringScoreMapping: getEl<HTMLSelectElement>('ring-score-mapping'),
+  logScoreStrengthRow: getEl<HTMLLabelElement>('log-score-strength-row'),
+  logScoreStrength: getEl<HTMLInputElement>('log-score-strength'),
+  logScoreStrengthLabel: getEl<HTMLSpanElement>('log-score-strength-label'),
   checkerboard: getEl<HTMLInputElement>('checkerboard'),
   targetColorMode: getEl<HTMLSelectElement>('target-color-mode'),
   showRingScores: getEl<HTMLInputElement>('show-ring-scores'),
@@ -172,13 +205,25 @@ let currentLayout: LayoutSolution | null = null;
 refs.pagePreset.value = DEFAULT_PAGE_PRESET;
 refs.layoutMode.value = 'auto_fill';
 refs.targetColorMode.value = 'bw';
+refs.ringScoreMapping.value = 'linear';
+syncDynamicSliderBounds();
+updateAllSliderLabels();
 toggleCustomSizeInputs();
 toggleSpacingModeInputs();
 toggleDesiredTargetsInput();
 toggleCheckerboardAvailability();
+toggleLogScoreStrengthVisibility();
 recalculate();
 
-type EditedField = 'page' | 'customWidth' | 'customHeight' | 'diameter' | 'minSpacing' | 'other';
+type EditedField =
+  | 'page'
+  | 'customWidth'
+  | 'customHeight'
+  | 'diameter'
+  | 'minSpacing'
+  | 'manualMargin'
+  | 'manualTargetSpacing'
+  | 'other';
 
 for (const el of [
   refs.pagePreset,
@@ -192,6 +237,8 @@ for (const el of [
   refs.layoutMode,
   refs.desiredTargets,
   refs.ringCount,
+  refs.ringScoreMapping,
+  refs.logScoreStrength,
   refs.checkerboard,
   refs.targetColorMode,
   refs.showRingScores,
@@ -199,9 +246,12 @@ for (const el of [
 ]) {
   el.addEventListener('input', () => {
     const editedField = resolveEditedField(el);
+    updateSliderLabelForInput(el);
     if (el === refs.pagePreset) {
       applyPresetToCustomInputs();
       toggleCustomSizeInputs();
+      syncDynamicSliderBounds();
+      updateAllSliderLabels();
     }
     if (el === refs.targetColorMode) {
       toggleCheckerboardAvailability();
@@ -209,8 +259,18 @@ for (const el of [
     if (el === refs.layoutMode) {
       toggleDesiredTargetsInput();
     }
+    if (el === refs.ringScoreMapping) {
+      toggleLogScoreStrengthVisibility();
+    }
     if (el === refs.autoSpacing) {
       toggleSpacingModeInputs();
+    }
+    if (el === refs.logScoreStrength) {
+      updateLogScoreStrengthLabel();
+    }
+    if (el === refs.customWidth || el === refs.customHeight || el === refs.diameter) {
+      syncDynamicSliderBounds();
+      updateAllSliderLabels();
     }
     recalculate(editedField);
   });
@@ -231,21 +291,25 @@ refs.downloadBtn.addEventListener('click', async () => {
     checkerboardEnabled: refs.checkerboard.checked,
     colorMode: getTargetColorMode(),
     showRingScores: refs.showRingScores.checked,
+    ringScoreMappingMode: getRingScoreMappingMode(),
+    ringScoreLogStrength: getRingScoreLogStrength(),
     layout: currentLayout,
   });
   refs.status.textContent = 'PDF 已生成：矢量图可直接打印，请使用 100% 缩放。';
 });
 
 function recalculate(editedField: EditedField = 'other'): void {
+  syncDynamicSliderBounds();
+  updateAllSliderLabels();
   let input = buildLayoutInput();
   let layout = solveOptimalLayout(input);
-  let autoAdjustMessage = '';
-  const spacingMode = getSpacingMode();
+  let snapMessage = '';
 
-  if (!layout && editedField !== 'other' && spacingMode === 'auto_min') {
-    const adjusted = autoAdjustToFeasible(input, editedField);
-    if (adjusted) {
-      autoAdjustMessage = adjusted;
+  if (!layout && editedField !== 'other') {
+    const snapped = snapEditedFieldToNearbyFeasible(editedField);
+    if (snapped) {
+      snapMessage = snapped;
+      updateAllSliderLabels();
       input = buildLayoutInput();
       layout = solveOptimalLayout(input);
     }
@@ -264,6 +328,7 @@ function recalculate(editedField: EditedField = 'other'): void {
     refs.outS.textContent = '-';
     refs.outTotal.textContent = '0';
     const reason = diagnoseNoLayoutReason(input);
+    const spacingMode = getSpacingMode();
     if (spacingMode === 'manual') {
       refs.status.textContent = reason;
       renderSvgPreview(null, input);
@@ -296,37 +361,8 @@ function recalculate(editedField: EditedField = 'other'): void {
   refs.outS.textContent = layout.spacingMm.toFixed(4);
   refs.outTotal.textContent = `${layout.totalTargets}`;
   const modeStatus = getLayoutModeStatus(layout);
-  refs.status.textContent = autoAdjustMessage
-    ? `${autoAdjustMessage} 已自动完成可行排布。${modeStatus}`
-    : `已完成本地最优排布计算。${modeStatus}`;
+  refs.status.textContent = snapMessage ? `${snapMessage}${modeStatus}` : `已完成本地最优排布计算。${modeStatus}`;
   renderSvgPreview(layout, input);
-}
-
-function autoAdjustToFeasible(input: LayoutInput, editedField: EditedField): string | null {
-  if (editedField !== 'minSpacing') {
-    const maxSpacing = getMaxStrictSpacingForCurrentDiameter(input);
-    const minSpacingMm = Number(input.minSpacingMm);
-    if (maxSpacing !== null && Number.isFinite(minSpacingMm) && maxSpacing + EPS < minSpacingMm) {
-      const newMinSpacing = Math.max(0.1, Number(maxSpacing.toFixed(4)));
-      refs.minSpacing.value = `${newMinSpacing}`;
-      return `已自动将 s_min 调整为 ${newMinSpacing.toFixed(4)} mm。`;
-    }
-  }
-
-  if (editedField !== 'diameter') {
-    const [nearest] = suggestNearbyFeasibleLayouts(input, {
-      limit: 1,
-      stepMm: 0.1,
-      maxDeltaMm: 40,
-      minDiameterMm: 1,
-    });
-    if (nearest) {
-      refs.diameter.value = `${nearest.diameterMm.toFixed(1)}`;
-      return `已自动将 D 调整为 ${nearest.diameterMm.toFixed(1)} mm。`;
-    }
-  }
-
-  return null;
 }
 
 function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | null {
@@ -364,6 +400,65 @@ function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | nul
   return Number.isFinite(maxSpacing) ? maxSpacing : null;
 }
 
+function snapEditedFieldToNearbyFeasible(editedField: EditedField): string | null {
+  const spacingMode = getSpacingMode();
+  if (editedField === 'diameter' && spacingMode === 'auto_min') {
+    const source = buildLayoutInput();
+    const [nearest] = suggestNearbyFeasibleLayouts(source, {
+      limit: 1,
+      stepMm: 0.1,
+      maxDeltaMm: 80,
+      minDiameterMm: 1,
+    });
+    if (!nearest) {
+      return null;
+    }
+    setSliderValue(refs.diameter, nearest.diameterMm);
+    updateSliderLabelForInput(refs.diameter);
+    return `当前直径无可行排布，已吸附到 D=${nearest.diameterMm.toFixed(1)} mm。`;
+  }
+
+  if (editedField === 'minSpacing' && spacingMode === 'auto_min') {
+    const maxSpacing = getMaxStrictSpacingForCurrentDiameter(buildLayoutInput());
+    const current = getPositiveNumber(refs.minSpacing);
+    if (maxSpacing !== null && maxSpacing + EPS < current) {
+      setSliderValue(refs.minSpacing, maxSpacing);
+      updateSliderLabelForInput(refs.minSpacing);
+      return `当前 s_min 无可行排布，已吸附到 s_min=${getPositiveNumber(refs.minSpacing).toFixed(1)} mm。`;
+    }
+    return null;
+  }
+
+  if (spacingMode === 'manual') {
+    if (editedField === 'diameter') {
+      const snapped = snapRangeInputToFeasible(refs.diameter);
+      if (snapped !== null) {
+        updateSliderLabelForInput(refs.diameter);
+        return `当前直径无可行排布，已吸附到 D=${snapped.toFixed(1)} mm。`;
+      }
+      return null;
+    }
+    if (editedField === 'manualMargin') {
+      const snapped = snapRangeInputToFeasible(refs.manualMargin);
+      if (snapped !== null) {
+        updateSliderLabelForInput(refs.manualMargin);
+        return `当前页边距无可行排布，已吸附到 ${snapped.toFixed(1)} mm。`;
+      }
+      return null;
+    }
+    if (editedField === 'manualTargetSpacing') {
+      const snapped = snapRangeInputToFeasible(refs.manualTargetSpacing);
+      if (snapped !== null) {
+        updateSliderLabelForInput(refs.manualTargetSpacing);
+        return `当前靶间距无可行排布，已吸附到 ${snapped.toFixed(1)} mm。`;
+      }
+      return null;
+    }
+  }
+
+  return null;
+}
+
 function resolveEditedField(el: HTMLElement): EditedField {
   if (el === refs.pagePreset) {
     return 'page';
@@ -380,7 +475,75 @@ function resolveEditedField(el: HTMLElement): EditedField {
   if (el === refs.minSpacing) {
     return 'minSpacing';
   }
+  if (el === refs.manualMargin) {
+    return 'manualMargin';
+  }
+  if (el === refs.manualTargetSpacing) {
+    return 'manualTargetSpacing';
+  }
   return 'other';
+}
+
+function snapRangeInputToFeasible(inputEl: HTMLInputElement): number | null {
+  const step = getInputStep(inputEl);
+  const min = Number(inputEl.min);
+  const max = Number(inputEl.max);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) {
+    return null;
+  }
+
+  const original = Number(inputEl.value);
+  if (!Number.isFinite(original)) {
+    return null;
+  }
+
+  const decimals = countStepDecimals(step);
+  const totalSteps = Math.ceil((max - min) / step);
+  for (let offset = 1; offset <= totalSteps; offset += 1) {
+    const candidateDown = Number((original - offset * step).toFixed(decimals));
+    if (candidateDown >= min - EPS) {
+      setSliderValue(inputEl, candidateDown);
+      if (solveOptimalLayout(buildLayoutInput())) {
+        return Number(inputEl.value);
+      }
+    }
+    const candidateUp = Number((original + offset * step).toFixed(decimals));
+    if (candidateUp <= max + EPS) {
+      setSliderValue(inputEl, candidateUp);
+      if (solveOptimalLayout(buildLayoutInput())) {
+        return Number(inputEl.value);
+      }
+    }
+  }
+
+  setSliderValue(inputEl, original);
+  return null;
+}
+
+function setSliderValue(inputEl: HTMLInputElement, value: number): void {
+  const min = Number(inputEl.min);
+  const max = Number(inputEl.max);
+  const step = getInputStep(inputEl);
+  const decimals = countStepDecimals(step);
+  const clamped = Math.min(max, Math.max(min, value));
+  inputEl.value = clamped.toFixed(decimals);
+}
+
+function getInputStep(inputEl: HTMLInputElement): number {
+  const parsed = Number(inputEl.step);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 1;
+  }
+  return parsed;
+}
+
+function countStepDecimals(step: number): number {
+  const text = step.toString();
+  const dot = text.indexOf('.');
+  if (dot < 0) {
+    return 0;
+  }
+  return text.length - dot - 1;
 }
 
 function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): void {
@@ -401,6 +564,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
   const colorMode = getTargetColorMode();
   const checkerboardEnabled = colorMode === 'bw' && refs.checkerboard.checked;
   const showRingScores = refs.showRingScores.checked;
+  const scoreMappingConfig = getRingScoreMappingConfig();
   const circles: string[] = [];
   const scoreLabels: string[] = [];
 
@@ -413,7 +577,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
         const outerRadiusMm = (input.targetDiameterMm / 2) * ((ringCount - ringIndex) / ringCount);
         const innerRadiusMm =
           ringIndex === ringCount - 1 ? 0 : (input.targetDiameterMm / 2) * ((ringCount - ringIndex - 1) / ringCount);
-        const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack);
+        const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack, scoreMappingConfig);
         circles.push(
           `<circle cx="${centerWithMargin.x}" cy="${centerWithMargin.y}" r="${outerRadiusMm}" fill="${fill}" stroke="#000" stroke-width="0.1" vector-effect="non-scaling-stroke" />`,
         );
@@ -427,7 +591,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
           continue;
         }
 
-        const score = ringScoreByIndex(ringIndex, ringCount);
+        const score = ringScoreByIndex(ringIndex, ringCount, scoreMappingConfig);
         const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
         const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
         const labelY = centerWithMargin.y - labelRadiusMm + fontSizeMm * 0.35;
@@ -517,6 +681,17 @@ function toggleCheckerboardAvailability(): void {
   refs.checkerboard.disabled = isColorMode;
 }
 
+function toggleLogScoreStrengthVisibility(): void {
+  const isLogMode = getRingScoreMappingMode() === 'log';
+  refs.logScoreStrengthRow.style.display = isLogMode ? 'grid' : 'none';
+  refs.logScoreStrength.disabled = !isLogMode;
+  updateLogScoreStrengthLabel();
+}
+
+function updateLogScoreStrengthLabel(): void {
+  refs.logScoreStrengthLabel.textContent = `${Math.round(getRingScoreLogStrength())}%`;
+}
+
 function applyPresetToCustomInputs(): void {
   const preset = refs.pagePreset.value as PagePreset;
   if (preset === 'custom') {
@@ -525,6 +700,76 @@ function applyPresetToCustomInputs(): void {
 
   refs.customWidth.value = `${PAGE_PRESETS_MM[preset].width}`;
   refs.customHeight.value = `${PAGE_PRESETS_MM[preset].height}`;
+}
+
+function syncDynamicSliderBounds(): void {
+  const page = getPageSize();
+  const minSide = Math.min(page.widthMm, page.heightMm);
+
+  refs.diameter.max = `${Math.max(1, Number((minSide - 0.1).toFixed(1)))}`;
+  const diameter = clampRangeValue(refs.diameter);
+
+  refs.manualMargin.max = `${Math.max(0, Number((minSide / 2 - 0.5).toFixed(1)))}`;
+  clampRangeValue(refs.manualMargin);
+
+  refs.manualTargetSpacing.max = `${Math.max(0, Number((minSide - diameter).toFixed(1)))}`;
+  clampRangeValue(refs.manualTargetSpacing);
+
+  const estimatedMaxTargets = Math.max(
+    1,
+    Math.floor(page.widthMm / Math.max(diameter, 1)) * Math.floor(page.heightMm / Math.max(diameter, 1)),
+  );
+  refs.desiredTargets.max = `${Math.max(10, estimatedMaxTargets)}`;
+  clampRangeValue(refs.desiredTargets);
+}
+
+function clampRangeValue(inputEl: HTMLInputElement): number {
+  const min = Number(inputEl.min);
+  const max = Number(inputEl.max);
+  const current = Number(inputEl.value);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || !Number.isFinite(current)) {
+    return 0;
+  }
+  const step = getInputStep(inputEl);
+  const decimals = countStepDecimals(step);
+  const clamped = Math.max(min, Math.min(max, current));
+  inputEl.value = clamped.toFixed(decimals);
+  return clamped;
+}
+
+function updateAllSliderLabels(): void {
+  updateSliderLabelForInput(refs.diameter);
+  updateSliderLabelForInput(refs.minSpacing);
+  updateSliderLabelForInput(refs.manualMargin);
+  updateSliderLabelForInput(refs.manualTargetSpacing);
+  updateSliderLabelForInput(refs.desiredTargets);
+  updateSliderLabelForInput(refs.ringCount);
+}
+
+function updateSliderLabelForInput(el: HTMLElement): void {
+  if (el === refs.diameter) {
+    refs.diameterValue.textContent = `${getPositiveNumber(refs.diameter).toFixed(1)} mm`;
+    return;
+  }
+  if (el === refs.minSpacing) {
+    refs.minSpacingValue.textContent = `${getPositiveNumber(refs.minSpacing).toFixed(1)} mm`;
+    return;
+  }
+  if (el === refs.manualMargin) {
+    refs.manualMarginValue.textContent = `${getNonNegativeNumber(refs.manualMargin).toFixed(1)} mm`;
+    return;
+  }
+  if (el === refs.manualTargetSpacing) {
+    refs.manualTargetSpacingValue.textContent = `${getNonNegativeNumber(refs.manualTargetSpacing).toFixed(1)} mm`;
+    return;
+  }
+  if (el === refs.desiredTargets) {
+    refs.desiredTargetsValue.textContent = `${getPositiveInteger(refs.desiredTargets)}`;
+    return;
+  }
+  if (el === refs.ringCount) {
+    refs.ringCountValue.textContent = `${getPositiveInteger(refs.ringCount)}`;
+  }
 }
 
 function getPositiveNumber(input: HTMLInputElement): number {
@@ -549,6 +794,29 @@ function getNonNegativeNumber(input: HTMLInputElement): number {
 
 function getTargetColorMode(): TargetColorMode {
   return refs.targetColorMode.value === 'color' ? 'color' : 'bw';
+}
+
+function getRingScoreMappingMode(): RingScoreMappingMode {
+  return refs.ringScoreMapping.value === 'log' ? 'log' : 'linear';
+}
+
+function getRingScoreLogStrength(): number {
+  const parsed = Number(refs.logScoreStrength.value);
+  if (!Number.isFinite(parsed)) {
+    return RING_SCORE_LOG_STRENGTH_DEFAULT;
+  }
+  return Math.min(100, Math.max(0, parsed));
+}
+
+function getRingScoreMappingConfig(): RingScoreMappingConfig {
+  const mode = getRingScoreMappingMode();
+  if (mode === 'linear') {
+    return { mode };
+  }
+  return {
+    mode,
+    logStrength: getRingScoreLogStrength(),
+  };
 }
 
 function getSpacingMode(): SpacingMode {

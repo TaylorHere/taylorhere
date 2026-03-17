@@ -4,6 +4,7 @@ import {
   ringFillColor,
   ringScoreByIndex,
   ringScoreTextColor,
+  type RingScoreMappingMode,
   type LayoutSolution,
   type TargetColorMode,
 } from '../shared/layout';
@@ -16,6 +17,8 @@ export interface PdfRenderInput {
   checkerboardEnabled: boolean;
   colorMode: TargetColorMode;
   showRingScores: boolean;
+  ringScoreMappingMode: RingScoreMappingMode;
+  ringScoreLogStrength: number;
   layout: LayoutSolution;
 }
 
@@ -42,6 +45,10 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([mmToPt(input.pageWidthMm), mmToPt(input.pageHeightMm)]);
   const pageHeightPt = mmToPt(input.pageHeightMm);
+  const scoreMappingConfig = {
+    mode: input.ringScoreMappingMode,
+    logStrength: input.ringScoreLogStrength,
+  };
 
   for (let row = 0; row < input.layout.rows; row += 1) {
     for (let col = 0; col < input.layout.columns; col += 1) {
@@ -55,7 +62,13 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
         const outerRadiusMm = (input.diameterMm / 2) * ((input.ringCount - ringIndex) / input.ringCount);
         const innerRadiusMm =
           ringIndex === input.ringCount - 1 ? 0 : (input.diameterMm / 2) * ((input.ringCount - ringIndex - 1) / input.ringCount);
-        const colorHex = ringFillColor(ringIndex, input.ringCount, input.colorMode, startWithBlack);
+        const colorHex = ringFillColor(
+          ringIndex,
+          input.ringCount,
+          input.colorMode,
+          startWithBlack,
+          scoreMappingConfig,
+        );
         const color = hexToRgbColor(colorHex);
 
         page.drawCircle({
@@ -76,7 +89,7 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
           continue;
         }
 
-        const score = ringScoreByIndex(ringIndex, input.ringCount);
+        const score = ringScoreByIndex(ringIndex, input.ringCount, scoreMappingConfig);
         const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
         const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
         const labelColorHex = ringScoreTextColor(colorHex);
