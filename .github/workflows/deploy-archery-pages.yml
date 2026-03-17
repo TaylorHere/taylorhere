@@ -41,11 +41,12 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: archery
+          wranglerVersion: "4.75.0"
           command: >
-            pages deploy archery/dist
+            pages deploy dist
             --project-name=archery
             --branch=${{ github.ref_name }}
-            --functions archery/functions
 
       - name: Ensure production custom domain
         if: github.ref == 'refs/heads/main'
