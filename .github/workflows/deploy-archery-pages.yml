@@ -1,0 +1,80 @@
+name: Deploy Archery to Cloudflare Pages
+
+on:
+  push:
+    branches:
+      - main
+      - cursor/**
+    paths:
+      - "archery/**"
+      - ".github/scripts/**"
+      - ".github/workflows/deploy-archery-pages.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ARCHERY_CUSTOM_DOMAIN: archery.taylorhere.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: archery/package-lock.json
+
+      - name: Install dependencies
+        working-directory: archery
+        run: npm ci
+
+      - name: Build
+        working-directory: archery
+        run: npm run build
+
+      - name: Ensure Pages project exists
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PROJECT_NAME: archery
+        run: |
+          GET_RESPONSE=$(curl -sS \
+            "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects/${CF_PROJECT_NAME}" \
+            -H "Authorization: Bearer ${CF_API_TOKEN}" \
+            -H "Content-Type: application/json")
+          node -e "const r=JSON.parse(process.argv[1]); if(r.success){process.exit(0);} process.exit(2);" "$GET_RESPONSE" || {
+            CREATE_RESPONSE=$(curl -sS -X POST \
+              "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/pages/projects" \
+              -H "Authorization: Bearer ${CF_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data "{\"name\":\"${CF_PROJECT_NAME}\",\"production_branch\":\"main\"}")
+            node -e "const r=JSON.parse(process.argv[1]); const exists=(r.errors||[]).some(e=>/already exists/i.test(String(e.message||''))); if(r.success||exists){console.log('Pages project ensured:', process.env.CF_PROJECT_NAME); process.exit(0);} console.error('Failed to ensure pages project', r); process.exit(1);" "$CREATE_RESPONSE"
+          }
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: archery
+          wranglerVersion: "4.75.0"
+          command: >
+            pages deploy dist
+            --project-name=archery
+            --branch=${{ github.ref_name }}
+
+      - name: Ensure custom domain and DNS
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_DNS_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PROJECT_NAME: archery
+          CF_CUSTOM_DOMAIN: ${{ env.ARCHERY_CUSTOM_DOMAIN }}
+          CF_ZONE_NAME: taylorhere.com
+          CF_TARGET_DOMAIN: archery.pages.dev
+        run: node .github/scripts/ensure-pages-domain.mjs

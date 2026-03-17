@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TaylorHere | 独立软件工作室</title>
+    <meta
+      name="description"
+      content="TaylorHere 独立软件工作室：专注训练工具、生成系统与自动化体验。在线体验射箭训练标靶生成系统。"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <nav class="top-nav">
+        <strong class="brand">TaylorHere</strong>
+        <a class="nav-link" href="https://archery.taylorhere.com" target="_blank" rel="noreferrer"
+          >打开 Archery</a
+        >
+      </nav>
+      <div class="hero-content">
+        <p class="eyebrow">独立软件工作室</p>
+        <h1>为训练场景打造可打印、可配置、可部署的软件产品</h1>
+        <p class="lead">
+          TaylorHere 专注于将“复杂规则”落地为“可直接使用”的工具。首个产品
+          <strong>Archery 射箭训练标靶生成系统</strong> 已上线。
+        </p>
+        <div class="cta-row">
+          <a class="btn primary" href="https://archery.taylorhere.com" target="_blank" rel="noreferrer"
+            >立即使用 Archery</a
+          >
+          <a class="btn ghost" href="#archery">查看产品详情</a>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="section">
+        <h2>我们做什么</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>规则引擎化</h3>
+            <p>将几何/排版/打印规则沉淀为可复用算法，保证结果严格可验证。</p>
+          </article>
+          <article class="card">
+            <h3>前后端一体</h3>
+            <p>从实时预览到导出能力，提供端到端一致体验，减少人工处理误差。</p>
+          </article>
+          <article class="card">
+            <h3>Cloudflare 原生部署</h3>
+            <p>采用 Pages + Functions，无服务器架构，支持全球 CDN 加速。</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="archery" class="section">
+        <h2>产品：Archery 射箭训练标靶生成系统</h2>
+        <ul class="feature-list">
+          <li>动态参数配置：直径、页面尺寸、最小间距、圆环、黑白棋盘模式</li>
+          <li>自动求解最优排布：输出 n / m / s，最大化 n×m</li>
+          <li>实时 SVG 预览（WYSIWYG，毫米级比例）</li>
+          <li>一键导出可打印矢量 PDF</li>
+        </ul>
+        <div class="cta-row">
+          <a class="btn primary" href="https://archery.taylorhere.com" target="_blank" rel="noreferrer"
+            >打开完整系统</a
+          >
+        </div>
+        <div class="frame-wrap">
+          <iframe
+            src="https://archery.taylorhere.com"
+            title="Archery 在线预览"
+            loading="lazy"
+            referrerpolicy="no-referrer"
+          ></iframe>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>© <span id="year"></span> TaylorHere · 独立软件工作室</p>
+    </footer>
+
+    <script>
+      document.getElementById('year').textContent = String(new Date().getFullYear());
+    </script>
+  </body>
+</html>
