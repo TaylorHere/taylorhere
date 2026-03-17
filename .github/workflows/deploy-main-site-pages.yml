@@ -51,8 +51,7 @@ jobs:
             --project-name=taylorhere
             --branch=${{ github.ref_name }}
 
-      - name: Ensure production custom domain
-        if: github.ref == 'refs/heads/main'
+      - name: Ensure custom domain
         env:
           CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
