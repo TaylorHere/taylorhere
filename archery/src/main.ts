@@ -13,6 +13,7 @@ import {
   type LayoutInput,
   type LayoutSolution,
   type PagePreset,
+  type SpacingMode,
   type TargetColorMode,
 } from '../shared/layout';
 
@@ -59,6 +60,21 @@ app.innerHTML = `
         <label>
           最小间距 s_min (mm)
           <input id="min-spacing" type="number" step="0.1" min="0.1" value="3" />
+        </label>
+
+        <label class="inline">
+          <input id="auto-spacing" type="checkbox" checked />
+          按最小间距自动计算页边距/靶间距
+        </label>
+
+        <label>
+          手动页边距 (mm)
+          <input id="manual-margin" type="number" step="0.1" min="0" value="3" disabled />
+        </label>
+
+        <label>
+          手动靶间距 (mm)
+          <input id="manual-target-spacing" type="number" step="0.1" min="0" value="3" disabled />
         </label>
 
         <label>
@@ -110,7 +126,8 @@ app.innerHTML = `
       <div class="result" id="result">
         <div>列数 n：<strong id="out-n">-</strong></div>
         <div>行数 m：<strong id="out-m">-</strong></div>
-        <div>统一间距 s：<strong id="out-s">-</strong> mm</div>
+        <div>页边距：<strong id="out-margin">-</strong> mm</div>
+        <div>靶间距 s：<strong id="out-s">-</strong> mm</div>
         <div>总数量 n×m：<strong id="out-total">-</strong></div>
         <div>页面：<strong id="out-page">-</strong></div>
       </div>
@@ -129,6 +146,9 @@ const refs = {
   customHeight: getEl<HTMLInputElement>('custom-height'),
   diameter: getEl<HTMLInputElement>('diameter'),
   minSpacing: getEl<HTMLInputElement>('min-spacing'),
+  autoSpacing: getEl<HTMLInputElement>('auto-spacing'),
+  manualMargin: getEl<HTMLInputElement>('manual-margin'),
+  manualTargetSpacing: getEl<HTMLInputElement>('manual-target-spacing'),
   layoutMode: getEl<HTMLSelectElement>('layout-mode'),
   desiredTargets: getEl<HTMLInputElement>('desired-targets'),
   ringCount: getEl<HTMLInputElement>('ring-count'),
@@ -141,6 +161,7 @@ const refs = {
   status: getEl<HTMLParagraphElement>('status'),
   outN: getEl<HTMLElement>('out-n'),
   outM: getEl<HTMLElement>('out-m'),
+  outMargin: getEl<HTMLElement>('out-margin'),
   outS: getEl<HTMLElement>('out-s'),
   outTotal: getEl<HTMLElement>('out-total'),
   outPage: getEl<HTMLElement>('out-page'),
@@ -152,6 +173,7 @@ refs.pagePreset.value = DEFAULT_PAGE_PRESET;
 refs.layoutMode.value = 'auto_fill';
 refs.targetColorMode.value = 'bw';
 toggleCustomSizeInputs();
+toggleSpacingModeInputs();
 toggleDesiredTargetsInput();
 toggleCheckerboardAvailability();
 recalculate();
@@ -164,6 +186,9 @@ for (const el of [
   refs.customHeight,
   refs.diameter,
   refs.minSpacing,
+  refs.autoSpacing,
+  refs.manualMargin,
+  refs.manualTargetSpacing,
   refs.layoutMode,
   refs.desiredTargets,
   refs.ringCount,
@@ -183,6 +208,9 @@ for (const el of [
     }
     if (el === refs.layoutMode) {
       toggleDesiredTargetsInput();
+    }
+    if (el === refs.autoSpacing) {
+      toggleSpacingModeInputs();
     }
     recalculate(editedField);
   });
@@ -212,8 +240,9 @@ function recalculate(editedField: EditedField = 'other'): void {
   let input = buildLayoutInput();
   let layout = solveOptimalLayout(input);
   let autoAdjustMessage = '';
+  const spacingMode = getSpacingMode();
 
-  if (!layout && editedField !== 'other') {
+  if (!layout && editedField !== 'other' && spacingMode === 'auto_min') {
     const adjusted = autoAdjustToFeasible(input, editedField);
     if (adjusted) {
       autoAdjustMessage = adjusted;
@@ -231,9 +260,15 @@ function recalculate(editedField: EditedField = 'other'): void {
   if (!layout) {
     refs.outN.textContent = '-';
     refs.outM.textContent = '-';
+    refs.outMargin.textContent = '-';
     refs.outS.textContent = '-';
     refs.outTotal.textContent = '0';
     const reason = diagnoseNoLayoutReason(input);
+    if (spacingMode === 'manual') {
+      refs.status.textContent = reason;
+      renderSvgPreview(null, input);
+      return;
+    }
     const suggestions = suggestNearbyFeasibleLayouts(input, {
       limit: 3,
       stepMm: 0.1,
@@ -257,6 +292,7 @@ function recalculate(editedField: EditedField = 'other'): void {
 
   refs.outN.textContent = `${layout.columns}`;
   refs.outM.textContent = `${layout.rows}`;
+  refs.outMargin.textContent = layout.marginMm.toFixed(4);
   refs.outS.textContent = layout.spacingMm.toFixed(4);
   refs.outTotal.textContent = `${layout.totalTargets}`;
   const modeStatus = getLayoutModeStatus(layout);
@@ -269,7 +305,8 @@ function recalculate(editedField: EditedField = 'other'): void {
 function autoAdjustToFeasible(input: LayoutInput, editedField: EditedField): string | null {
   if (editedField !== 'minSpacing') {
     const maxSpacing = getMaxStrictSpacingForCurrentDiameter(input);
-    if (maxSpacing !== null && maxSpacing + EPS < input.minSpacingMm) {
+    const minSpacingMm = Number(input.minSpacingMm);
+    if (maxSpacing !== null && Number.isFinite(minSpacingMm) && maxSpacing + EPS < minSpacingMm) {
       const newMinSpacing = Math.max(0.1, Number(maxSpacing.toFixed(4)));
       refs.minSpacing.value = `${newMinSpacing}`;
       return `已自动将 s_min 调整为 ${newMinSpacing.toFixed(4)} mm。`;
@@ -369,7 +406,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
 
   for (let row = 0; row < layout.rows; row += 1) {
     for (let col = 0; col < layout.columns; col += 1) {
-      const center = getTargetCenterMm(col, row, input.targetDiameterMm, layout.spacingMm);
+      const centerWithMargin = getTargetCenterMm(col, row, input.targetDiameterMm, layout.spacingMm, layout.marginMm);
       const startWithBlack = checkerboardEnabled ? (row + col) % 2 === 0 : true;
 
       for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
@@ -378,7 +415,7 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
           ringIndex === ringCount - 1 ? 0 : (input.targetDiameterMm / 2) * ((ringCount - ringIndex - 1) / ringCount);
         const fill = ringFillColor(ringIndex, ringCount, colorMode, startWithBlack);
         circles.push(
-          `<circle cx="${center.x}" cy="${center.y}" r="${outerRadiusMm}" fill="${fill}" stroke="#000" stroke-width="0.1" vector-effect="non-scaling-stroke" />`,
+          `<circle cx="${centerWithMargin.x}" cy="${centerWithMargin.y}" r="${outerRadiusMm}" fill="${fill}" stroke="#000" stroke-width="0.1" vector-effect="non-scaling-stroke" />`,
         );
 
         if (!showRingScores) {
@@ -393,10 +430,10 @@ function renderSvgPreview(layout: LayoutSolution | null, input: LayoutInput): vo
         const score = ringScoreByIndex(ringIndex, ringCount);
         const labelRadiusMm = (outerRadiusMm + innerRadiusMm) / 2;
         const fontSizeMm = Math.min(3.2, Math.max(1.2, bandThicknessMm * 0.9));
-        const labelY = center.y - labelRadiusMm + fontSizeMm * 0.35;
+        const labelY = centerWithMargin.y - labelRadiusMm + fontSizeMm * 0.35;
         const textColor = ringScoreTextColor(fill);
         scoreLabels.push(
-          `<text x="${center.x}" y="${labelY}" text-anchor="middle" font-size="${fontSizeMm}" fill="${textColor}" font-weight="600">${score}</text>`,
+          `<text x="${centerWithMargin.x}" y="${labelY}" text-anchor="middle" font-size="${fontSizeMm}" fill="${textColor}" font-weight="600">${score}</text>`,
         );
       }
     }
@@ -443,11 +480,15 @@ function getPageSize(): { widthMm: number; heightMm: number } {
 function buildLayoutInput(): LayoutInput {
   const page = getPageSize();
   const layoutMode = getLayoutMode();
+  const spacingMode = getSpacingMode();
   return {
     pageWidthMm: page.widthMm,
     pageHeightMm: page.heightMm,
     targetDiameterMm: getPositiveNumber(refs.diameter),
-    minSpacingMm: getPositiveNumber(refs.minSpacing),
+    spacingMode,
+    minSpacingMm: spacingMode === 'auto_min' ? getPositiveNumber(refs.minSpacing) : undefined,
+    manualMarginMm: spacingMode === 'manual' ? getNonNegativeNumber(refs.manualMargin) : undefined,
+    manualTargetSpacingMm: spacingMode === 'manual' ? getNonNegativeNumber(refs.manualTargetSpacing) : undefined,
     layoutMode,
     desiredTargets: layoutMode === 'target_count' ? getPositiveInteger(refs.desiredTargets) : undefined,
   };
@@ -462,6 +503,13 @@ function toggleCustomSizeInputs(): void {
 function toggleDesiredTargetsInput(): void {
   const isTargetCountMode = getLayoutMode() === 'target_count';
   refs.desiredTargets.disabled = !isTargetCountMode;
+}
+
+function toggleSpacingModeInputs(): void {
+  const manualMode = getSpacingMode() === 'manual';
+  refs.minSpacing.disabled = manualMode;
+  refs.manualMargin.disabled = !manualMode;
+  refs.manualTargetSpacing.disabled = !manualMode;
 }
 
 function toggleCheckerboardAvailability(): void {
@@ -491,8 +539,20 @@ function getPositiveInteger(input: HTMLInputElement): number {
   return Math.max(1, Math.round(getPositiveNumber(input)));
 }
 
+function getNonNegativeNumber(input: HTMLInputElement): number {
+  const parsed = Number(input.value);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return parsed;
+}
+
 function getTargetColorMode(): TargetColorMode {
   return refs.targetColorMode.value === 'color' ? 'color' : 'bw';
+}
+
+function getSpacingMode(): SpacingMode {
+  return refs.autoSpacing.checked ? 'auto_min' : 'manual';
 }
 
 function getLayoutMode(): LayoutMode {

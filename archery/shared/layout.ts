@@ -1,12 +1,16 @@
 export type PagePreset = 'A4' | 'A3' | 'custom';
 export type TargetColorMode = 'bw' | 'color';
 export type LayoutMode = 'auto_fill' | 'target_count';
+export type SpacingMode = 'auto_min' | 'manual';
 
 export interface LayoutInput {
   pageWidthMm: number;
   pageHeightMm: number;
   targetDiameterMm: number;
-  minSpacingMm: number;
+  minSpacingMm?: number;
+  spacingMode?: SpacingMode;
+  manualMarginMm?: number;
+  manualTargetSpacingMm?: number;
   layoutMode?: LayoutMode;
   desiredTargets?: number;
 }
@@ -15,6 +19,7 @@ export interface LayoutSolution {
   columns: number;
   rows: number;
   spacingMm: number;
+  marginMm: number;
   totalTargets: number;
 }
 
@@ -29,6 +34,8 @@ export interface ValidationResult {
 }
 
 const EPS = 1e-7;
+const COLOR_RING_OUTER = '#000000';
+const COLOR_RING_CENTER = '#facc15';
 
 export const PAGE_PRESETS_MM: Record<Exclude<PagePreset, 'custom'>, { width: number; height: number }> = {
   A4: { width: 210, height: 297 },
@@ -40,12 +47,28 @@ export function validateInput(input: LayoutInput): ValidationResult {
     ['pageWidthMm', input.pageWidthMm],
     ['pageHeightMm', input.pageHeightMm],
     ['targetDiameterMm', input.targetDiameterMm],
-    ['minSpacingMm', input.minSpacingMm],
   ];
 
   for (const [name, value] of values) {
     if (!Number.isFinite(value) || value <= 0) {
       return { ok: false, reason: `${name} 必须是大于 0 的数字` };
+    }
+  }
+
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    const manualMargin = Number(input.manualMarginMm);
+    const manualSpacing = Number(input.manualTargetSpacingMm);
+    if (!Number.isFinite(manualMargin) || manualMargin < 0) {
+      return { ok: false, reason: '手动模式下页边距必须是大于等于 0 的数字' };
+    }
+    if (!Number.isFinite(manualSpacing) || manualSpacing < 0) {
+      return { ok: false, reason: '手动模式下靶间距必须是大于等于 0 的数字' };
+    }
+  } else {
+    const minSpacingMm = Number(input.minSpacingMm);
+    if (!Number.isFinite(minSpacingMm) || minSpacingMm <= 0) {
+      return { ok: false, reason: '自动模式下 minSpacingMm 必须是大于 0 的数字' };
     }
   }
 
@@ -66,10 +89,15 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
     return null;
   }
 
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    return solveManualSpacingLayout(input);
+  }
+
   const W = input.pageWidthMm;
   const H = input.pageHeightMm;
   const D = input.targetDiameterMm;
-  const sMin = input.minSpacingMm;
+  const sMin = Number(input.minSpacingMm);
 
   const maxColumns = Math.floor((W - sMin) / (D + sMin));
   const maxRows = Math.floor((H - sMin) / (D + sMin));
@@ -107,6 +135,7 @@ export function solveOptimalLayout(input: LayoutInput): LayoutSolution | null {
         columns: n,
         rows: m,
         spacingMm,
+        marginMm: spacingMm,
         totalTargets,
       };
 
@@ -132,10 +161,22 @@ export function diagnoseNoLayoutReason(input: LayoutInput): string {
     return validation.reason ?? '参数无效';
   }
 
+  const spacingMode = normalizeSpacingMode(input.spacingMode);
+  if (spacingMode === 'manual') {
+    const marginMm = Number(input.manualMarginMm);
+    const D = input.targetDiameterMm;
+    const maxUsableWidth = input.pageWidthMm - 2 * marginMm;
+    const maxUsableHeight = input.pageHeightMm - 2 * marginMm;
+    if (maxUsableWidth < D - EPS || maxUsableHeight < D - EPS) {
+      return '手动页边距过大：当前页面可用区域不足以放下 1 个标靶。请减小页边距或直径。';
+    }
+    return '当前手动页边距/靶间距组合无可行排布。请减小页边距、靶间距或标靶直径。';
+  }
+
   const W = input.pageWidthMm;
   const H = input.pageHeightMm;
   const D = input.targetDiameterMm;
-  const sMin = input.minSpacingMm;
+  const sMin = Number(input.minSpacingMm);
 
   // s > 0 时，必须满足 n·D < W 且 m·D < H。
   const maxColumnsWithPositiveSpacing = Math.floor((W - EPS) / D);
@@ -186,7 +227,12 @@ export function suggestNearbyFeasibleLayouts(
     minDiameterMm?: number;
   },
 ): NearbyLayoutSuggestion[] {
-  const pageValidation: Array<number> = [input.pageWidthMm, input.pageHeightMm, input.minSpacingMm];
+  if (normalizeSpacingMode(input.spacingMode) === 'manual') {
+    return [];
+  }
+
+  const minSpacingMm = Number(input.minSpacingMm);
+  const pageValidation: Array<number> = [input.pageWidthMm, input.pageHeightMm, minSpacingMm];
   for (const value of pageValidation) {
     if (!Number.isFinite(value) || value <= 0) {
       return [];
@@ -197,7 +243,7 @@ export function suggestNearbyFeasibleLayouts(
   const stepMm = Math.max(0.01, options?.stepMm ?? 0.1);
   const maxDeltaMm = Math.max(stepMm, options?.maxDeltaMm ?? 20);
   const minDiameterMm = Math.max(0.1, options?.minDiameterMm ?? 1);
-  const maxDiameterMm = Math.min(input.pageWidthMm, input.pageHeightMm) - input.minSpacingMm - EPS;
+  const maxDiameterMm = Math.min(input.pageWidthMm, input.pageHeightMm) - minSpacingMm - EPS;
   if (maxDiameterMm < minDiameterMm) {
     return [];
   }
@@ -259,10 +305,11 @@ export function getTargetCenterMm(
   row: number,
   diameterMm: number,
   spacingMm: number,
+  marginMm = spacingMm,
 ): { x: number; y: number } {
   return {
-    x: spacingMm + diameterMm / 2 + col * (diameterMm + spacingMm),
-    y: spacingMm + diameterMm / 2 + row * (diameterMm + spacingMm),
+    x: marginMm + diameterMm / 2 + col * (diameterMm + spacingMm),
+    y: marginMm + diameterMm / 2 + row * (diameterMm + spacingMm),
   };
 }
 
@@ -273,7 +320,17 @@ export function ringColorByIndex(ringIndexFromOuter: number, startWithBlack: boo
 
 export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number): number {
   const safeRingCount = Math.max(1, Math.round(ringCount));
-  return Math.min(safeRingCount, ringIndexFromOuter + 1);
+  const safeIndex = Math.min(safeRingCount - 1, Math.max(0, Math.round(ringIndexFromOuter)));
+  if (safeRingCount === 1) {
+    return 10;
+  }
+  if (safeIndex === 0) {
+    return 1;
+  }
+  if (safeIndex === safeRingCount - 1) {
+    return 10;
+  }
+  return Math.floor(1 + (safeIndex / (safeRingCount - 1)) * 9);
 }
 
 export function ringFillColor(
@@ -286,8 +343,22 @@ export function ringFillColor(
     return ringColorByIndex(ringIndexFromOuter, startWithBlack);
   }
 
-  // 经典环靶配色（按分值分段）：1-2 白，3-4 黑，5-6 蓝，7-8 红，9+ 黄
-  const score = ringScoreByIndex(ringIndexFromOuter, ringCount);
+  const safeRingCount = Math.max(1, Math.round(ringCount));
+  const safeIndex = Math.min(safeRingCount - 1, Math.max(0, Math.round(ringIndexFromOuter)));
+  if (safeRingCount === 1) {
+    // 单环时中心与外环重合，优先保证中心为黄色。
+    return COLOR_RING_CENTER;
+  }
+  if (safeIndex === 0) {
+    return COLOR_RING_OUTER;
+  }
+  if (safeIndex === safeRingCount - 1) {
+    return COLOR_RING_CENTER;
+  }
+
+  // 按“分数段 -> 箭靶色板”映射，不做插值：
+  // 9-10 黄，7-8 红，5-6 蓝，1-4 黑。
+  const score = ringScoreByIndex(safeIndex, safeRingCount);
   if (score >= 9) {
     return '#facc15';
   }
@@ -297,22 +368,107 @@ export function ringFillColor(
   if (score >= 5) {
     return '#2563eb';
   }
-  if (score >= 3) {
-    return '#000000';
-  }
-  return '#ffffff';
+  return '#000000';
 }
 
 export function ringScoreTextColor(fillHex: string): '#000000' | '#FFFFFF' {
-  const hex = fillHex.toLowerCase();
-  if (hex === '#000000' || hex === '#2563eb' || hex === '#dc2626') {
+  const rgb = parseHexRgb(fillHex);
+  if (!rgb) {
+    return '#000000';
+  }
+  const luminance = relativeLuminance(rgb.r, rgb.g, rgb.b);
+  if (luminance < 0.45) {
     return '#FFFFFF';
   }
   return '#000000';
 }
 
+function parseHexRgb(hex: string): { r: number; g: number; b: number } | null {
+  const normalized = hex.trim().toLowerCase();
+  const matched = /^#([0-9a-f]{6})$/.exec(normalized);
+  if (!matched) {
+    return null;
+  }
+  const raw = matched[1];
+  return {
+    r: Number.parseInt(raw.slice(0, 2), 16),
+    g: Number.parseInt(raw.slice(2, 4), 16),
+    b: Number.parseInt(raw.slice(4, 6), 16),
+  };
+}
+
+function relativeLuminance(r: number, g: number, b: number): number {
+  const toLinear = (channel: number): number => {
+    const normalized = channel / 255;
+    if (normalized <= 0.04045) {
+      return normalized / 12.92;
+    }
+    return ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  const rl = toLinear(r);
+  const gl = toLinear(g);
+  const bl = toLinear(b);
+  return 0.2126 * rl + 0.7152 * gl + 0.0722 * bl;
+}
+
 function normalizeLayoutMode(mode?: LayoutMode): LayoutMode {
   return mode === 'target_count' ? 'target_count' : 'auto_fill';
+}
+
+function normalizeSpacingMode(mode?: SpacingMode): SpacingMode {
+  return mode === 'manual' ? 'manual' : 'auto_min';
+}
+
+function solveManualSpacingLayout(input: LayoutInput): LayoutSolution | null {
+  const W = input.pageWidthMm;
+  const H = input.pageHeightMm;
+  const D = input.targetDiameterMm;
+  const marginMm = Number(input.manualMarginMm);
+  const spacingMm = Number(input.manualTargetSpacingMm);
+
+  const usableWidth = W - 2 * marginMm;
+  const usableHeight = H - 2 * marginMm;
+  if (usableWidth < D - EPS || usableHeight < D - EPS) {
+    return null;
+  }
+
+  const maxColumns = Math.floor((usableWidth + spacingMm + EPS) / (D + spacingMm));
+  const maxRows = Math.floor((usableHeight + spacingMm + EPS) / (D + spacingMm));
+  if (maxColumns < 1 || maxRows < 1) {
+    return null;
+  }
+
+  const candidates: LayoutSolution[] = [];
+  for (let n = 1; n <= maxColumns; n += 1) {
+    const usedWidth = n * D + (n - 1) * spacingMm;
+    if (usedWidth > usableWidth + EPS) {
+      continue;
+    }
+    for (let m = 1; m <= maxRows; m += 1) {
+      const usedHeight = m * D + (m - 1) * spacingMm;
+      if (usedHeight > usableHeight + EPS) {
+        continue;
+      }
+      candidates.push({
+        columns: n,
+        rows: m,
+        spacingMm,
+        marginMm,
+        totalTargets: n * m,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const mode = normalizeLayoutMode(input.layoutMode);
+  if (mode === 'target_count') {
+    return pickClosestByDesiredTargets(candidates, Math.max(1, Math.round(Number(input.desiredTargets))));
+  }
+  return pickAutoFillBest(candidates);
 }
 
 function pickAutoFillBest(candidates: LayoutSolution[]): LayoutSolution {
