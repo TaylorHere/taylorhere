@@ -273,7 +273,7 @@ export function ringColorByIndex(ringIndexFromOuter: number, startWithBlack: boo
 
 export function ringScoreByIndex(ringIndexFromOuter: number, ringCount: number): number {
   const safeRingCount = Math.max(1, Math.round(ringCount));
-  return safeRingCount - ringIndexFromOuter;
+  return Math.min(safeRingCount, ringIndexFromOuter + 1);
 }
 
 export function ringFillColor(

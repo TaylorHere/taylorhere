@@ -319,17 +319,7 @@ function autoAdjustToFeasible(input: LayoutInput, editedField: EditedField): str
     }
   }
 
-  const customPage = suggestNearestCustomPageForFixedDiameter(input);
-  if (!customPage) {
-    return null;
-  }
-
-  refs.pagePreset.value = 'custom';
-  refs.customWidth.value = `${customPage.widthMm.toFixed(1)}`;
-  refs.customHeight.value = `${customPage.heightMm.toFixed(1)}`;
-  toggleCustomSizeInputs();
-
-  return `已自动切换为自定义页面 ${customPage.widthMm.toFixed(1)} × ${customPage.heightMm.toFixed(1)} mm。`;
+  return null;
 }
 
 function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | null {
@@ -365,54 +355,6 @@ function getMaxStrictSpacingForCurrentDiameter(input: LayoutInput): number | nul
   }
 
   return Number.isFinite(maxSpacing) ? maxSpacing : null;
-}
-
-function suggestNearestCustomPageForFixedDiameter(
-  input: LayoutInput,
-): { widthMm: number; heightMm: number } | null {
-  const W = input.pageWidthMm;
-  const H = input.pageHeightMm;
-  const D = input.targetDiameterMm;
-  const s = input.minSpacingMm;
-  if (!Number.isFinite(W) || !Number.isFinite(H) || !Number.isFinite(D) || !Number.isFinite(s)) {
-    return null;
-  }
-  if (W <= 0 || H <= 0 || D <= 0 || s <= 0) {
-    return null;
-  }
-
-  const nApprox = Math.max(1, Math.round((W - s) / (D + s)));
-  const mApprox = Math.max(1, Math.round((H - s) / (D + s)));
-  const nMin = Math.max(1, nApprox - 8);
-  const nMax = nApprox + 8;
-  const mMin = Math.max(1, mApprox - 8);
-  const mMax = mApprox + 8;
-
-  let best: { widthMm: number; heightMm: number; score: number; total: number } | null = null;
-  for (let n = nMin; n <= nMax; n += 1) {
-    for (let m = mMin; m <= mMax; m += 1) {
-      const widthMm = n * D + (n + 1) * s;
-      const heightMm = m * D + (m + 1) * s;
-      if (widthMm <= 0 || heightMm <= 0) {
-        continue;
-      }
-
-      const score = Math.abs(widthMm - W) + Math.abs(heightMm - H);
-      const total = n * m;
-      if (
-        !best ||
-        score < best.score - EPS ||
-        (Math.abs(score - best.score) <= EPS && total > best.total)
-      ) {
-        best = { widthMm, heightMm, score, total };
-      }
-    }
-  }
-
-  if (!best) {
-    return null;
-  }
-  return { widthMm: best.widthMm, heightMm: best.heightMm };
 }
 
 function resolveEditedField(el: HTMLElement): EditedField {
