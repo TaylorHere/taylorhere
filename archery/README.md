@@ -1,11 +1,11 @@
 # 射箭训练标靶生成系统（Cloudflare 可部署）
 
-该项目是一个可直接部署的“前端 + 后端 + PDF”一体化实现，满足以下核心目标：
+该项目是一个可直接部署的“前端 + PDF”一体化实现，满足以下核心目标：
 
 - 前端动态配置参数并实时预览（SVG 矢量）
 - 严格几何约束下自动求最优排布（最大化 `n × m`）
 - 浏览器端生成可打印 PDF（矢量，毫米精确）
-- Cloudflare Pages + Functions 无服务器部署
+- Cloudflare Pages 无服务器部署
 
 ---
 
@@ -35,15 +35,6 @@
   - 尺寸按 mm 精确映射到 pt（`72 / 25.4`）
   - 支持下载打印
 
-### 后端（Cloudflare Functions）
-
-- `POST /api/layout`
-- 入参：页面宽高、标靶直径、最小间距
-- 出参：最优 `n/m/s/total` 或无解原因
-- 前后端共用 `shared/layout.ts`，避免算法漂移
-
----
-
 ## 2. 关键几何约束
 
 设页面尺寸为 `W × H`，标靶直径 `D`，列数 `n`，行数 `m`，统一间距/页边距 `s`，必须同时满足：
@@ -69,11 +60,8 @@ H = m·D + (m+1)·s
 
 ```text
 archery/
-├─ functions/
-│  └─ api/
-│     └─ layout.ts          # Cloudflare Pages Function（后端API）
 ├─ shared/
-│  └─ layout.ts             # 前后端共用的排布算法
+│  └─ layout.ts             # 排布算法
 ├─ src/
 │  ├─ main.ts               # 前端页面与SVG实时预览
 │  ├─ pdf.ts                # PDF矢量导出
@@ -114,8 +102,7 @@ npm run build
 
 1. 构建 `archery` 前端
 2. 部署 `archery/dist` 静态资源
-3. 一并部署 `archery/functions` 的 Serverless API
-4. 当主分支部署时，自动确保生产域名为 `archery.taylorhere.com`
+3. 当主分支部署时，自动确保生产域名为 `archery.taylorhere.com`
 
 > 说明：`CLOUDFLARE_API_TOKEN` 需包含 Pages 项目与域名管理权限（至少覆盖 Pages 编辑权限）。
 

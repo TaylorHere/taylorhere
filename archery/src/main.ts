@@ -105,7 +105,6 @@ app.innerHTML = `
           <span id="zoom-label">100%</span>
         </label>
         <button id="download-pdf" type="button">下载 PDF（矢量）</button>
-        <button id="verify-api" type="button" class="secondary">后端 API 复核</button>
       </div>
 
       <div class="result" id="result">
@@ -146,7 +145,6 @@ const refs = {
   outTotal: getEl<HTMLElement>('out-total'),
   outPage: getEl<HTMLElement>('out-page'),
   downloadBtn: getEl<HTMLButtonElement>('download-pdf'),
-  verifyApiBtn: getEl<HTMLButtonElement>('verify-api'),
 };
 
 let currentLayout: LayoutSolution | null = null;
@@ -208,34 +206,6 @@ refs.downloadBtn.addEventListener('click', async () => {
     layout: currentLayout,
   });
   refs.status.textContent = 'PDF 已生成：矢量图可直接打印，请使用 100% 缩放。';
-});
-
-refs.verifyApiBtn.addEventListener('click', async () => {
-  const input = buildLayoutInput();
-  refs.status.textContent = '正在请求后端 API 复核...';
-
-  try {
-    const response = await fetch('/api/layout', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(input),
-    });
-
-    if (!response.ok) {
-      refs.status.textContent = `后端 API 异常：HTTP ${response.status}`;
-      return;
-    }
-
-    const data = (await response.json()) as { ok: boolean; layout: LayoutSolution | null; reason?: string };
-    if (!data.ok || !data.layout) {
-      refs.status.textContent = `后端复核：无可行解。${data.reason ? `原因：${data.reason}` : ''}`;
-      return;
-    }
-
-    refs.status.textContent = `后端复核成功：n=${data.layout.columns}, m=${data.layout.rows}, s=${data.layout.spacingMm.toFixed(4)}mm`;
-  } catch {
-    refs.status.textContent = '后端 API 不可达（本地前端计算仍可使用）。部署到 Cloudflare Pages 后可直接复核。';
-  }
 });
 
 function recalculate(editedField: EditedField = 'other'): void {
