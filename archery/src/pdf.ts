@@ -97,18 +97,13 @@ export async function exportArcheryPdf(input: PdfRenderInput): Promise<void> {
 
 function hexToRgbColor(hex: string): ReturnType<typeof rgb> {
   const normalized = hex.trim().toLowerCase();
-  switch (normalized) {
-    case '#000000':
-      return rgb(0, 0, 0);
-    case '#ffffff':
-      return rgb(1, 1, 1);
-    case '#2563eb':
-      return rgb(37 / 255, 99 / 255, 235 / 255);
-    case '#dc2626':
-      return rgb(220 / 255, 38 / 255, 38 / 255);
-    case '#facc15':
-      return rgb(250 / 255, 204 / 255, 21 / 255);
-    default:
-      return rgb(0, 0, 0);
+  const matched = /^#([0-9a-f]{6})$/.exec(normalized);
+  if (!matched) {
+    return rgb(0, 0, 0);
   }
+  const value = matched[1];
+  const r = Number.parseInt(value.slice(0, 2), 16) / 255;
+  const g = Number.parseInt(value.slice(2, 4), 16) / 255;
+  const b = Number.parseInt(value.slice(4, 6), 16) / 255;
+  return rgb(r, g, b);
 }
