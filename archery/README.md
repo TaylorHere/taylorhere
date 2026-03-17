@@ -109,7 +109,6 @@ npm run build
 
 - `secrets.CLOUDFLARE_API_TOKEN`
 - `secrets.CLOUDFLARE_ACCOUNT_ID`
-- `vars.CLOUDFLARE_PAGES_PROJECT`（Pages 项目名）
 
 推送后会自动：
 
