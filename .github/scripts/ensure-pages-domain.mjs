@@ -47,7 +47,11 @@ async function cfRequest(method, path, body) {
 
 function hasAlreadyExistsError(payload) {
   const errors = payload?.errors ?? [];
-  return errors.some((e) => /already exists/i.test(String(e?.message ?? '')));
+  return errors.some((e) => {
+    const code = Number(e?.code);
+    const message = String(e?.message ?? '');
+    return code === 8000018 || /already exists/i.test(message) || /already added this custom domain/i.test(message);
+  });
 }
 
 function normalizeRecordName(name) {
